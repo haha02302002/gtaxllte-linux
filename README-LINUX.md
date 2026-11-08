@@ -286,3 +286,19 @@ kernel. Restore it with:
 ```
 
 (this writes `dumps/boot_stock.img` back to `mmcblk0p9`)
+
+---
+
+## 9. Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| No USB device at all, screen frozen | A kernel panic: the bootloader passes `oops=panic`, and a panic tears down the USB gadget, so the CDC-ACM device simply vanishes | Read `/media/boot.log` (the loader logs each step, plus `dmesg` up to `switch_root`) from TWRP or Android |
+| Windows lists the COM port but `SerialPort.Open()` fails with "device attached to the system is not functioning" | Stale USB-serial handle after the gadget re-enumerated | Unplug and replug the USB cable; the COM number may change |
+| Tablet powers off instead of rebooting when `reboot` is run from the loader shell | The reset does not survive on this PMIC/bootloader combination | Press Power to boot it again |
+| Concentrated fuel-gauge spam (`sec_bat_cisd_check: Fail to sm5703-fuelgauge get`) | No charger power-supply partner in a bare Linux userspace | Cosmetic; the loader drops the console loglevel to crit for the shell only |
+| `FMCS IS RESOURCE DUMP DUMP END` is the last line on screen | The framebuffer console stops updating there in every boot, including working ones | Not a failure sign — ignore it and watch the USB serial console instead |
+
+Drop `/media/NOSWITCH` on userdata to make the loader stop with the distro mounted
+at `/newroot` and hand over the serial shell instead of switching; from there
+`touch /media/GO` lets PID 1 perform the real `switch_root` while you watch.
