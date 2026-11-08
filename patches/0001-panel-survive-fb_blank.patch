@@ -1,0 +1,49 @@
+Subject: [PATCH] gtaxllte: keep the HX8279D panel alive across fb_blank
+
+FB_BLANK_NORMAL means "the console is hidden" (X sets KD_GRAPHICS on its VT),
+not "remove power from the display". decon_blank() maps it to decon_disable()
+-> decon_board_power_off(), which drops gpio_lcd_rst, the buck and LCD_1P8 and
+resets the panel controller.
+
+Nothing ever re-initialises that controller: dsim_disable() only calls the
+panel's suspend op in command mode (`if (mode != DECON_VIDEO_MODE)`), so on this
+video-mode panel lcd->state stays PANEL_STATE_RESUMED, and
+dsim_panel_displayon() re-sends hx8279d_init() only when the state is
+PANEL_STATE_SUSPENED. One blank therefore leaves the panel lit but black for the
+rest of the boot.
+
+Measured on the device: "+ dsim_panel_displayon: 0" jumps straight to
+"- dsim_panel_displayon: 1, 1" with no "hx8279d_init: ++" in between.
+
+Fix both sides: ignore FB_BLANK_NORMAL in decon_blank(), and always run the
+panel suspend op so a real power-down can be recovered by displayon().
+--- a/drivers/video/fbdev/exynos/decon_7870/decon_core.c
++++ b/drivers/video/fbdev/exynos/decon_7870/decon_core.c
+@@ -1212,6 +1212,12 @@
+ 	switch (blank_mode) {
+ 	case FB_BLANK_POWERDOWN:
+ 	case FB_BLANK_NORMAL:
++		/* FB_BLANK_NORMAL only means the console is hidden (X sets
++		 * KD_GRAPHICS on its VT). decon_disable() cuts the panel rails
++		 * and the panel is never re-initialised, so it stays black.
++		 * Keep scanning instead. */
++		if (blank_mode == FB_BLANK_NORMAL)
++			break;
+ 		DISP_SS_EVENT_LOG(DISP_EVT_BLANK, &decon->sd, ktime_set(0, 0));
+ 		ret = decon_disable(decon);
+ 		if (ret) {
+--- a/drivers/video/fbdev/exynos/decon_7870/dsim_drv.c
++++ b/drivers/video/fbdev/exynos/decon_7870/dsim_drv.c
+@@ -877,8 +877,10 @@
+ 	dsim_pkt_go_enable(dsim, false);
+ #endif
+ 	dsim_set_lcd_full_screen(dsim);
+-	if (dsim->lcd_info.mode != DECON_VIDEO_MODE)
+-		call_panel_ops(dsim, suspend, dsim);
++	/* Always suspend the panel so lcd->state reaches PANEL_STATE_SUSPENED:
++	 * dsim_panel_displayon() only re-sends hx8279d_init() from that state,
++	 * and decon_disable() cuts the rails anyway. */
++	call_panel_ops(dsim, suspend, dsim);
+ 
+ #ifdef CONFIG_LCD_DOZE_MODE
+ 	dsim->doze_state = DOZE_STATE_SUSPEND;

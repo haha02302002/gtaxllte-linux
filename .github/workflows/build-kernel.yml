@@ -1,5 +1,9 @@
 name: Build Linux kernel for SM-T585 (gtaxllte)
 
+# gh release create/upload needs a write token; the default for new repos is read-only.
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
@@ -54,6 +58,24 @@ jobs:
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile | tr '\n' ' '
           echo
           test -f "arch/arm64/configs/${DEFCONFIG}" || { echo "missing ${DEFCONFIG}"; exit 1; }
+
+      # The HX8279D panel is dead for the rest of the boot once decon_blank()
+      # maps FB_BLANK_NORMAL to decon_disable(): X sets KD_GRAPHICS on its VT,
+      # the rails are cut and nothing re-sends hx8279d_init(). See the patch
+      # header for the measurements.
+      - name: Apply panel patch
+        run: |
+          set -euo pipefail
+          P="${GITHUB_WORKSPACE}/patches/0001-panel-survive-fb_blank.patch"
+          test -f "$P" || { echo "missing $P"; exit 1; }
+          cd kernel
+          git apply --check "$P"
+          git apply "$P"
+          git apply --stat "$P"
+          # Fail the build if either hunk silently did not land.
+          grep -q 'blank_mode == FB_BLANK_NORMAL' drivers/video/fbdev/exynos/decon/decon_core.c
+          grep -q 'Always suspend the panel' drivers/video/fbdev/exynos/dsim/dsim_drv.c
+          echo "panel patch applied"
 
       - name: Build kernel Image
         run: |
@@ -250,3 +272,18 @@ jobs:
           name: gtaxllte-linux-twrp
           path: out/gtaxllte-linux-twrp.zip
           if-no-files-found: error
+
+      # Artifact downloads need an authenticated session even on a public repo;
+      # a release asset is a plain public URL, so the build can be fetched with
+      # curl from the machine that flashes the tablet.
+      - name: Publish boot.img as a public release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=kernel-latest
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --title 'Latest gtaxllte Linux kernel' \
+            --notes 'Rolling release: boot.img from the newest successful Actions run.'
+          gh release upload "$TAG" out/boot.img out/build-info.txt --clobber
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/boot.img"
