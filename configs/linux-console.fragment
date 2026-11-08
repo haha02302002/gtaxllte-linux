@@ -36,9 +36,3 @@ CONFIG_USB_CONFIGFS_SERIAL=y
 # Samsung's legacy android.c composite probes the only UDC at boot, which would
 # leave the configfs gadget below unable to bind and /dev/ttyGS0 missing.
 # CONFIG_USB_G_ANDROID is not set
-
-# The FIMC-IS camera stack dumps its resources at ~2.8s into boot and was the
-# last thing printed when the kernel stopped before userspace started. Nothing
-# here uses a camera, so keep it out of the boot path.
-# CONFIG_FIMC_IS_V3_11_0 is not set
-# CONFIG_FIMC_BNS_V4_10_0 is not set
