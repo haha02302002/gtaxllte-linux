@@ -181,7 +181,7 @@ find_rootfs() {
 
     echo "[3/4] rootfs.img on userdata"
     if mount_data; then
-        for img in /media/rootfs.img /media/media/0/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img /media/0/rootfs.img; do
+        for img in /media/rootfs.img /media/media/rootfs.img /media/media/0/rootfs.img /media/0/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img; do
             if [ -f "$img" ]; then
                 echo "[..]   found $img"
                 if loop_try "$img" && accept_root; then
