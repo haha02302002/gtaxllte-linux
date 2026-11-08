@@ -237,6 +237,22 @@ loader prints `[3/4]`, finds the image, loop-mounts it and reports
 Everything installed with `apk add` persists, because it is a real ext4 image on
 userdata.
 
+### Alpine's minirootfs is a chroot image, not a bootable system
+
+The official `alpine-minirootfs-3.20.10-aarch64.tar.gz` has 518 entries, **no
+`/sbin/openrc` and no `/etc/init.d`**, yet its `/etc/inittab` runs
+`/sbin/openrc sysinit`. Hand that to `switch_root` and init starts with every
+sysinit action failing, which is why the image build now writes a busybox-only
+inittab (mount -a, hostname, getty on `ttyGS0` and `tty1`) and a complete fstab:
+that boots to a login prompt without openrc. Install the rest from inside the
+running system with `apk add alpine-base` once networking works.
+
+Diagnosis path, for the record: with `rootfs.img` present the tablet showed no
+USB device at all, which is what a panic does under `oops=panic` (the gadget
+disappears with it). Hiding the image restored the serial shell, and from that
+shell `losetup`, the ext4 mount and `chroot` into the image all worked — so the
+kernel and the image were fine and only the handoff was broken.
+
 ### Known issue: do not embed the rootfs in the kernel
 
 Baking the minirootfs into the initramfs (4 MB larger Image) makes the kernel

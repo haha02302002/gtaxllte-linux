@@ -79,10 +79,16 @@ jobs:
           rm -rf /tmp/rootfs
           mkdir -p /tmp/rootfs
           sudo tar -xzf /tmp/alpine.tar.gz -C /tmp/rootfs
-          echo 'ttyGS0::respawn:/sbin/getty -L ttyGS0 115200 vt100' | sudo tee -a /tmp/rootfs/etc/inittab >/dev/null
+          # alpine-minirootfs is a chroot image: it ships no openrc and no
+          # /etc/init.d, yet its inittab runs /sbin/openrc, so every sysinit
+          # action fails. Replace it with a busybox-only inittab that mounts the
+          # pseudo filesystems, sets the hostname, and gives a getty on the USB
+          # gadget port and on the screen.
+          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -L ttyGS0 115200 vt100\ntty1::respawn:/sbin/getty -L tty1 115200 vt100\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
           echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
           printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
-          printf 'proc /proc proc defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
+          printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
+          sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts
           rm -f out/rootfs.img out/rootfs.img.gz
           sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 1024M
           echo "image bytes: $(stat -c%s out/rootfs.img)"
