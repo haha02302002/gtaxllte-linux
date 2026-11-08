@@ -230,9 +230,28 @@ directory like on most phones), so the pushed file shows up as
 `/media/media/rootfs.img` once the loader mounts userdata at `/media`. The
 loader checks that path, `/media/rootfs.img`, and a couple of globs, so putting
 it at `/sdcard/rootfs.img` is enough. The image is 1 GiB
-ext4 labelled `alpine`, with a getty already added on `ttyGS0`; on first boot the
-loader prints `[3/4]`, finds the image, loop-mounts it and reports
-`switching to … (loop)`. Log in on the COM port as `root` with no password.
+ext4 labelled `alpine`; on first boot the loader prints `[3/4]`, finds the image,
+loop-mounts it and reports `switching to … (loop)`. The USB gadget console then
+autologins as root — no login prompt, no password.
+
+Verified boot (the tablet's own console output):
+
+```
+Welcome to Alpine Linux 3.20
+Kernel 3.18.140-followmsi+ on an aarch64 (/dev/ttyGS0)
+
+id                      -> uid=0(root) gid=0(root)
+head -2 /etc/os-release -> NAME="Alpine Linux" / ID=alpine
+uname -a                -> Linux gtaxllte 3.18.140-followmsi+ #1 SMP PREEMPT aarch64
+cat /etc/shadow | head  -> root:::0:::::
+apk --version           -> apk-tools 2.14.4, compiled for aarch64
+/sys/class/graphics/fb0 -> 1200,1920 @ 32bpp
+df -h /                 -> 1 GiB ext4 on /dev/loop0, persistent
+```
+
+The `root` password is cleared in the image because the minirootfs ships it
+locked (`root:*::0:::::`), which answers every attempt with `Login incorrect` on
+a console that has no keyboard. Give it a password with `passwd` once inside.
 
 Everything installed with `apk add` persists, because it is a real ext4 image on
 userdata.
