@@ -91,7 +91,7 @@ jobs:
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
                 xorg-server xf86-video-fbdev xf86-input-evdev \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
-                twm xterm xvkbd ttf-dejavu font-noto dbus polkit
+                twm xterm matchbox-keyboard font-dejavu font-noto dbus polkit
             du -sh /rootfs/usr/share/xfce4 2>/dev/null || true
             ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
           '
@@ -148,7 +148,10 @@ jobs:
 
           Xorg :0 vt1 -keeptty -nolisten tcp &
           sleep 4
-          xvkbd -geometry 1180x320+10-10 -alwaysontop >/dev/null 2>&1 &
+          # on-screen keyboard: whichever of these is installed
+for kb in matchbox-keyboard xvkbd; do
+    command -v "$kb" >/dev/null 2>&1 && { "$kb" >/dev/null 2>&1 & break; }
+done
           if [ -x /usr/bin/startxfce4 ]; then
               exec startxfce4
           elif [ -x /usr/bin/twm ]; then
