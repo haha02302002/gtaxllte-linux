@@ -36,7 +36,16 @@ ROOT="$OUT/initramfs-root"
 rm -rf "$ROOT"
 mkdir -p "$ROOT"/{bin,sbin,etc,proc,sys,dev,dev/pts,tmp,run,mnt,root,usr/bin,usr/sbin}
 install -m 0755 "$HERE/initramfs/init"    "$ROOT/init"
-install -m 0755 "$HERE/initramfs/busybox" "$ROOT/bin/busybox"
+# The busybox pulled from TWRP is dynamically linked against Android's linker,
+# which does not exist in a bare initramfs, so every exec would fail with
+# "No working init found". Use the static build when it is available.
+if [ -f "$HERE/initramfs/busybox-static" ]; then
+    BB="$HERE/initramfs/busybox-static"
+else
+    BB="$HERE/initramfs/busybox"
+fi
+echo "==> busybox: $BB"
+install -m 0755 "$BB" "$ROOT/bin/busybox"
 
 # Real applet symlinks at build time: /init must not depend on
 # `busybox --install` succeeding at runtime.
