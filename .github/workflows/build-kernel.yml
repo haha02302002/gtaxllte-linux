@@ -65,10 +65,11 @@ jobs:
           ENABLE_VT: ${{ inputs.enable_vt && '1' || '1' }}
           EMBED_DISTRO: ${{ inputs.embed_distro && '1' || '0' }}
 
-      # The kernel wedges at ~2.7s if the rootfs is embedded in its initramfs,
-      # so Alpine lives on storage instead: a 1 GiB ext4 image that init mounts
-      # through /dev/loop0 after finding it on the userdata partition.
-      - name: Build Alpine rootfs image
+      # alpine-minirootfs is a chroot image: no openrc, no /etc/init.d, root locked
+      # and an inittab that runs /sbin/openrc. It is fixed up here and given the
+      # whole desktop stack, because the tablet has no usable network (qcacld wants
+      # firmware that is not shipped) and can therefore never run apk itself.
+      - name: Build Alpine rootfs image with XFCE
         run: |
           set -euo pipefail
           MIRROR=https://dl-cdn.alpinelinux.org/alpine
@@ -76,26 +77,100 @@ jobs:
           FILE=$(curl -fsSL "$MIRROR/$BRANCH/releases/aarch64/" | grep -oE 'alpine-minirootfs-[0-9.]+-aarch64\.tar\.gz' | sort -uV | tail -1)
           echo "alpine: $FILE"
           curl -fsSL -o /tmp/alpine.tar.gz "$MIRROR/$BRANCH/releases/aarch64/$FILE"
-          rm -rf /tmp/rootfs
-          mkdir -p /tmp/rootfs
+          rm -rf /tmp/rootfs && mkdir -p /tmp/rootfs
           sudo tar -xzf /tmp/alpine.tar.gz -C /tmp/rootfs
-          # alpine-minirootfs is a chroot image: it ships no openrc and no
-          # /etc/init.d, yet its inittab runs /sbin/openrc, so every sysinit
-          # action fails. Replace it with a busybox-only inittab that mounts the
-          # pseudo filesystems, sets the hostname, and gives a getty on the USB
-          # gadget port and on the screen.
-          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -n -l /bin/sh -L ttyGS0 115200 vt100\ntty1::respawn:/sbin/getty -L tty1 115200 vt100\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
-          # The minirootfs ships root with a locked password, so a plain login is
-          # answered with "Login incorrect"; clear the hash so root can log in on
-          # a console that has no keyboard, and let ttyGS0 autologin instead.
+
+          # apk is architecture-agnostic for extraction (-X mirrors, --arch aarch64)
+          # and --no-scripts skips the aarch64 binaries this x86 container cannot run.
+          # Services come from our own inittab, not openrc, so the skipped scripts
+          # are not needed.
+          docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
+            set -e
+            apk --root /rootfs --arch aarch64 --no-scripts --no-progress add \
+                --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
+                --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
+                xorg-server xf86-video-fbdev xf86-input-evdev \
+                xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
+                twm xterm xvkbd ttf-dejavu font-noto dbus polkit
+            du -sh /rootfs/usr/share/xfce4 2>/dev/null || true
+            ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
+          '
+
+          # image fixups: unlocked root, busybox inittab, hostname, resolv, fstab
           sudo sed -i 's|^root:[^:]*:|root::|' /tmp/rootfs/etc/shadow
+          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -n -l /bin/sh -L ttyGS0 115200 vt100\ntty1::respawn:/usr/local/bin/start-gui\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
           echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
           printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
           printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
-          sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts
+          sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts /tmp/rootfs/etc/X11 /tmp/rootfs/root/.config
+
+          # Start X on the framebuffer with the touchscreen as the pointer. The event
+          # node number moves between boots, so it is resolved by device name.
+          sudo tee /tmp/rootfs/usr/local/bin/start-gui >/dev/null <<'GUI'
+          #!/bin/sh
+          # tty1 respawn target: bring up X on the framebuffer, then a desktop.
+          exec >/dev/tty1 2>&1
+          export HOME=/root DISPLAY=:0
+          export XDG_RUNTIME_DIR=/run/xdg
+          mkdir -p /run/xdg && chmod 700 /run/xdg
+          mkdir -p /etc/X11 /var/log
+
+          EV=$(grep -l sec_touchscreen /sys/class/input/event*/device/name 2>/dev/null | head -1)
+          EV=/dev/input/$(basename "${EV:-event1}")
+          echo "touchscreen: $EV"
+
+          cat > /etc/X11/xorg.conf <<CONF
+          Section "ServerLayout"
+              Identifier "layout"
+              Screen "screen"
+              InputDevice "touch"
+          EndSection
+          Section "Device"
+              Identifier "fb"
+              Driver "fbdev"
+              Option "fbdev" "/dev/fb0"
+          EndSection
+          Section "Screen"
+              Identifier "screen"
+              Device "fb"
+              DefaultDepth 24
+              SubSection "Display"
+                  Depth 24
+                  Modes "1200x1920"
+              EndSubSection
+          EndSection
+          Section "InputDevice"
+              Identifier "touch"
+              Driver "evdev"
+              Option "Device" "$EV"
+          EndSection
+          CONF
+
+          Xorg :0 vt1 -keeptty -nolisten tcp &
+          sleep 4
+          xvkbd -geometry 1180x320+10-10 -alwaysontop >/dev/null 2>&1 &
+          if [ -x /usr/bin/startxfce4 ]; then
+              exec startxfce4
+          elif [ -x /usr/bin/twm ]; then
+              xterm -geometry 80x30+40+200 &
+              exec twm
+          else
+              exec xterm
+          fi
+          GUI
+          sudo chmod 755 /tmp/rootfs/usr/local/bin/start-gui
+
+          # autologin root into an XFCE session when X is started from tty1
+          sudo tee /tmp/rootfs/root/.xinitrc >/dev/null <<'XINIT'
+          #!/bin/sh
+          exec startxfce4
+          XINIT
+          sudo chmod 755 /tmp/rootfs/root/.xinitrc
+
           rm -f out/rootfs.img out/rootfs.img.gz
-          sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 1024M
+          sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 2048M
           echo "image bytes: $(stat -c%s out/rootfs.img)"
+          sudo e2fsck -fn out/rootfs.img || true
           gzip -9 out/rootfs.img
           echo "gz bytes: $(stat -c%s out/rootfs.img.gz)"
           echo "gz md5: $(md5sum out/rootfs.img.gz | cut -d' ' -f1)"
