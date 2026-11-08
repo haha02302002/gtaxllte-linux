@@ -143,6 +143,21 @@ mount_data() {
     return 1
 }
 
+loop_try() {
+    img="$1"
+    if losetup /dev/loop0 "$img" 2>/dev/null; then
+        if try_root_dev /dev/loop0; then return 0; fi
+        losetup -d /dev/loop0 2>/dev/null
+        return 1
+    fi
+    # busybox mount can attach the loop device by itself
+    if mount -t ext4 -o loop,rw "$img" "$NEWROOT" 2>/dev/null; then
+        echo "[..]   mounted via mount -o loop"
+        return 0
+    fi
+    return 1
+}
+
 find_rootfs() {
     echo "[1/4] cmdline root="
     if [ -n "$WANT_ROOT" ]; then
@@ -166,13 +181,12 @@ find_rootfs() {
 
     echo "[3/4] rootfs.img on userdata"
     if mount_data; then
-        for img in /media/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img; do
+        for img in /media/rootfs.img /media/media/0/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img /media/0/rootfs.img; do
             if [ -f "$img" ]; then
                 echo "[..]   found $img"
-                if losetup /dev/loop0 "$img" 2>/dev/null && try_root_dev /dev/loop0 && accept_root; then
+                if loop_try "$img" && accept_root; then
                     ROOT_HOW="$img (loop)"; return 0
                 fi
-                losetup -d /dev/loop0 2>/dev/null
             fi
         done
         echo "[..]   no rootfs.img"

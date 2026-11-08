@@ -36,7 +36,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev python3 zip unzip \
-            ccache xz-utils cpio rsync
+            ccache xz-utils cpio rsync e2fsprogs
 
       - name: Fetch aarch64 cross toolchain (GCC 8.3)
         run: |
@@ -65,12 +65,38 @@ jobs:
           ENABLE_VT: ${{ inputs.enable_vt && '1' || '1' }}
           EMBED_DISTRO: ${{ inputs.embed_distro && '1' || '0' }}
 
+      # The kernel wedges at ~2.7s if the rootfs is embedded in its initramfs,
+      # so Alpine lives on storage instead: a 1 GiB ext4 image that init mounts
+      # through /dev/loop0 after finding it on the userdata partition.
+      - name: Build Alpine rootfs image
+        run: |
+          set -euo pipefail
+          MIRROR=https://dl-cdn.alpinelinux.org/alpine
+          BRANCH=v3.20
+          FILE=$(curl -fsSL "$MIRROR/$BRANCH/releases/aarch64/" | grep -oE 'alpine-minirootfs-[0-9.]+-aarch64\.tar\.gz' | sort -uV | tail -1)
+          echo "alpine: $FILE"
+          curl -fsSL -o /tmp/alpine.tar.gz "$MIRROR/$BRANCH/releases/aarch64/$FILE"
+          rm -rf /tmp/rootfs
+          mkdir -p /tmp/rootfs
+          sudo tar -xzf /tmp/alpine.tar.gz -C /tmp/rootfs
+          echo 'ttyGS0::respawn:/sbin/getty -L ttyGS0 115200 vt100' | sudo tee -a /tmp/rootfs/etc/inittab >/dev/null
+          echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
+          printf 'proc /proc proc defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
+          rm -f out/rootfs.img out/rootfs.img.gz
+          sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 1024M
+          echo "image bytes: $(stat -c%s out/rootfs.img)"
+          gzip -9 out/rootfs.img
+          echo "gz bytes: $(stat -c%s out/rootfs.img.gz)"
+          echo "gz md5: $(md5sum out/rootfs.img.gz | cut -d' ' -f1)"
+
       - name: Report result
         run: |
           echo "### boot.img built" >> "$GITHUB_STEP_SUMMARY"
           ls -l out/ >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           md5sum out/boot.img >> "$GITHUB_STEP_SUMMARY"
+          [ -f out/rootfs.img.gz ] && md5sum out/rootfs.img.gz >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload boot.img
@@ -83,4 +109,11 @@ jobs:
             out/ramdisk.gz
             out/config.effective
             out/build-info.txt
+          if-no-files-found: error
+
+      - name: Upload Alpine rootfs image
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-rootfs
+          path: out/rootfs.img.gz
           if-no-files-found: error
