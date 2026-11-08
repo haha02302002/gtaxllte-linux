@@ -2,14 +2,14 @@
 # Minimal Linux bring-up init for Samsung SM-T585 (gtaxllte).
 #
 # CRITICAL: this is PID 1. It must NEVER exit, or the kernel panics with
-# "Attempted to kill init" and Samsung's watchdog (sec_watchdog.sec_pet=5
-# in the bootloader cmdline) reboots the tablet after 5 seconds, forever.
+# "Attempted to kill init" and Samsung's watchdog reboots after ~5s.
 # So: no top-level `exec`, and the shell is respawned in a loop.
 
 /bin/busybox --install -s /bin 2>/dev/null
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
+export TERM=linux
 
 mount -t proc     proc     /proc  2>/dev/null
 mount -t sysfs    sysfs    /sys   2>/dev/null
@@ -19,7 +19,12 @@ mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /run    2>/dev/null
 mount -t tmpfs  tmpfs  /tmp    2>/dev/null
 
-# Pick the first console that actually exists.
+# The Samsung sm5703 fuelgauge has no charger power-supply device in a bare
+# Linux userspace and retries forever, flooding the console with
+# "Fail to get psy (sm5703-charger)". Raise the console loglevel so only
+# crit/emerg reach the screen; dmesg still holds everything.
+dmesg -n 2 2>/dev/null
+
 CONSOLE=/dev/console
 for c in /dev/tty0 /dev/tty1 /dev/tty2 /dev/console; do
     if [ -c "$c" ]; then CONSOLE="$c"; break; fi
@@ -42,13 +47,11 @@ cat /proc/consoles 2>/dev/null
 echo
 echo "-- framebuffer --"
 cat /proc/fb 2>/dev/null || echo "(no /proc/fb)"
-ls /dev/fb* /dev/tty* 2>/dev/null | head -20
 echo
 echo "-- input devices --"
-grep -E '^(N|H):' /proc/bus/input/devices 2>/dev/null | head -20
+grep -E '^(N|H):' /proc/bus/input/devices 2>/dev/null | head -20 || echo "(none yet)"
 echo
 
-# eMMC userdata partition, if the kernel exposed it.
 DATA=
 for p in /dev/mmcblk0p23 /dev/block/mmcblk0p23; do
     if [ -b "$p" ]; then DATA="$p"; break; fi
@@ -61,20 +64,25 @@ if [ -n "$DATA" ]; then
     else
         echo "[!!] could not mount $DATA"
     fi
-else
-    echo "[!!] userdata partition not found"
 fi
 echo
+echo "Shell needs a USB OTG keyboard - there is no on-screen keyboard here."
+echo "Everything is in RAM; a reboot discards all changes."
+echo
 
-# Respawn the shell forever. If it dies, we log it and come back; PID 1 stays alive.
+# Respawn the shell forever. `setsid -c` makes the shell a session leader with
+# /dev/tty0 as its controlling terminal, which is what gives working job
+# control (otherwise sh prints "can't access tty; job control turned off").
 while true; do
-    echo "=== launching shell (type 'help' for busybox applets, 'exit' to respawn) ==="
+    echo "=== launching shell on tty0 ('help' for applets, 'exit' to respawn) ==="
     if [ -c /dev/tty0 ]; then
-        setsid sh -c 'exec sh </dev/tty0 >/dev/tty0 2>&1'
+        if ! setsid -c sh -c 'exec sh -i </dev/tty0 >/dev/tty0 2>&1'; then
+            sh -i </dev/tty0 >/dev/tty0 2>&1
+        fi
     else
-        sh <"$CONSOLE" >"$CONSOLE" 2>&1
+        sh -i <"$CONSOLE" >"$CONSOLE" 2>&1
     fi
     echo
-    echo "=== shell exited; respawning in 3s (init stays alive) ==="
+    echo "=== shell exited (status $?); respawning in 3s ==="
     sleep 3
 done
