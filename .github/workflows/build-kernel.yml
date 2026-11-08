@@ -196,7 +196,7 @@ jobs:
           # ("invalid superblock checksum") and drops to the loader shell. The
           # feature set is therefore pinned explicitly and verified below.
           sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -I 256 \
-            -O ^metadata_csum,^metadata_csum_seed,^64bit,^orphan_file,^bigalloc,^quota,^project,^ea_inode,^casefold,^encrypt,^verity,^fast_commit,^inline_data,^sparse_super2 \
+            -O ^metadata_csum,^metadata_csum_seed,^64bit,^bigalloc,^quota,^project,^ea_inode,^casefold,^encrypt,^verity,^fast_commit,^inline_data,^sparse_super2 \
             -E lazy_itable_init=0,lazy_journal_init=0 \
             -d /tmp/rootfs out/rootfs.img 2048M
           echo "image bytes: $(stat -c%s out/rootfs.img)"
