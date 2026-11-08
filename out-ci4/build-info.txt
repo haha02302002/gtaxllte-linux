@@ -1,0 +1,7 @@
+device: SM-T585 / gtaxllte (Exynos 7870)
+kernel: VERSION = 3.PATCHLEVEL = 18.SUBLEVEL = 140
+defconfig: lineage-gtaxllte_defconfig
+cmdline: console=tty0 console=ttySAC2,115200 panic=0 rdinit=/init
+initramfs embedded: 1
+boot.img: 23808000 bytes (partition limit 33554432)
+md5: cd877a350a423b4bda6ee60fe75e5114
