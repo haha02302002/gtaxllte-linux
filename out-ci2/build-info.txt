@@ -1,0 +1,5 @@
+device: SM-T585 / gtaxllte (Exynos 7870)
+kernel: VERSION = 3.PATCHLEVEL = 18.SUBLEVEL = 140
+defconfig: lineage-gtaxllte_defconfig
+boot.img: 23752704 bytes (partition limit 33554432)
+md5: d3f2163a933edec83bbe75e38571e519

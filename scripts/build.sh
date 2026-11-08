@@ -8,7 +8,8 @@
 # Optional:
 #   OUT            output directory (default: ./out)
 #   DEFCONFIG      default: lineage-gtaxllte_defconfig
-#   ENABLE_VT      1 to merge configs/linux-console.fragment (default 1)
+#   EMBED_INITRAMFS  1 (default) to also embed the initramfs inside the kernel,
+#                    so booting does not depend on the bootloader passing a ramdisk
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,18 +25,40 @@ RAMDISK_ADDR=0x11000000
 TAGS_ADDR=0x10000100
 PAGE_SIZE=2048
 BOOT_PARTITION_BYTES=33554432
+CMDLINE="console=tty0 console=ttySAC2,115200 panic=0 rdinit=/init"
 
 mkdir -p "$OUT"
+
+# ---------------------------------------------------------------- initramfs
+# Staged BEFORE the kernel build so it can be embedded into the Image.
+echo "==> staging initramfs"
+ROOT="$OUT/initramfs-root"
+rm -rf "$ROOT"
+mkdir -p "$ROOT"/{bin,sbin,etc,proc,sys,dev,dev/pts,tmp,run,mnt,root,usr/bin,usr/sbin}
+install -m 0755 "$HERE/initramfs/init"    "$ROOT/init"
+install -m 0755 "$HERE/initramfs/busybox" "$ROOT/bin/busybox"
+
+# Real applet symlinks at build time: /init must not depend on
+# `busybox --install` succeeding at runtime.
+for a in sh mount umount cat ls echo grep head tail sleep setsid uname mkdir \
+         mknod chmod chown ln dmesg kill pwd readlink; do
+    ln -sf busybox "$ROOT/bin/$a"
+done
+
+python3 "$HERE/tools/build_initramfs.py" "$ROOT" "$OUT/ramdisk.gz"
+
+# ---------------------------------------------------------------- kernel
 cd "$KERNEL_DIR"
-
-echo "==> kernel source: $(grep -m1 '^VERSION' Makefile) $(grep -m1 '^PATCHLEVEL' Makefile) $(grep -m1 '^SUBLEVEL' Makefile)"
-
+echo "==> kernel source: $(grep -m1 '^VERSION' Makefile).$(grep -m1 '^PATCHLEVEL' Makefile).$(grep -m1 '^SUBLEVEL' Makefile)"
 echo "==> defconfig: $DEFCONFIG"
 make ARCH=$ARCH CROSS_COMPILE="$CROSS_COMPILE" "$DEFCONFIG"
 
-if [ "${ENABLE_VT:-1}" = "1" ]; then
-    echo "==> merging console/VT fragment"
-    scripts/kconfig/merge_config.sh -m .config "$HERE/configs/linux-console.fragment"
+echo "==> merging console/VT fragment"
+scripts/kconfig/merge_config.sh -m .config "$HERE/configs/linux-console.fragment"
+
+if [ "${EMBED_INITRAMFS:-1}" = "1" ]; then
+    echo "==> embedding initramfs from $ROOT"
+    scripts/config --set-str CONFIG_INITRAMFS_SOURCE "$ROOT"
 fi
 
 make ARCH=$ARCH CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
@@ -46,40 +69,36 @@ for sym in CONFIG_VT_CONSOLE CONFIG_FRAMEBUFFER_CONSOLE; do
     grep -q "^$sym=y" "$OUT/config.effective" || {
         echo "ERROR: $sym is not enabled - the kernel would boot with no visible console"; exit 1; }
 done
+if [ "${EMBED_INITRAMFS:-1}" = "1" ]; then
+    grep -q "^CONFIG_INITRAMFS_SOURCE=\"$ROOT\"" "$OUT/config.effective" || {
+        echo "ERROR: initramfs embedding requested but CONFIG_INITRAMFS_SOURCE was not set"; exit 1; }
+fi
 
 echo "==> compiling Image"
 make ARCH=$ARCH CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" Image
-
 cp arch/arm64/boot/Image "$OUT/Image"
 
-echo "==> building initramfs"
-ROOT="$OUT/initramfs-root"
-rm -rf "$ROOT"
-mkdir -p "$ROOT"/{bin,sbin,etc,proc,sys,dev,dev/pts,tmp,run,mnt,root,usr/bin,usr/sbin}
-cp "$HERE/initramfs/init" "$ROOT/init"
-chmod 0755 "$ROOT/init"
-cp "$HERE/initramfs/busybox" "$ROOT/bin/busybox"
-chmod 0755 "$ROOT/bin/busybox"
-python3 "$HERE/tools/build_initramfs.py" "$ROOT" "$OUT/ramdisk.gz"
-
+# ---------------------------------------------------------------- boot.img
 echo "==> packing boot.img"
 python3 "$HERE/tools/mkbootimg.py" \
     --kernel "$OUT/Image" \
     --ramdisk "$OUT/ramdisk.gz" \
-    --dtb "$HERE/initramfs/../dumps/dt.img" \
+    --dtb "$HERE/dumps/dt.img" \
     --out "$OUT/boot.img" \
     --kernel-addr "$KERNEL_ADDR" \
     --ramdisk-addr "$RAMDISK_ADDR" \
     --tags-addr "$TAGS_ADDR" \
     --page-size "$PAGE_SIZE" \
     --header-version 0 \
-    --cmdline "console=tty0 console=ttySAC2,115200"
+    --cmdline "$CMDLINE"
 
 SIZE=$(stat -c%s "$OUT/boot.img")
 {
     echo "device: SM-T585 / gtaxllte (Exynos 7870)"
     echo "kernel: $(grep -m1 '^VERSION' Makefile).$(grep -m1 '^PATCHLEVEL' Makefile).$(grep -m1 '^SUBLEVEL' Makefile)"
     echo "defconfig: $DEFCONFIG"
+    echo "cmdline: $CMDLINE"
+    echo "initramfs embedded: ${EMBED_INITRAMFS:-1}"
     echo "boot.img: $SIZE bytes (partition limit $BOOT_PARTITION_BYTES)"
     echo "md5: $(md5sum "$OUT/boot.img" | cut -d' ' -f1)"
 } | tee "$OUT/build-info.txt"
