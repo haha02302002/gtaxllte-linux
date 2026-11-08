@@ -1,8 +1,8 @@
 #!/bin/sh
 # tty1 respawn target for the SM-T585: X on the framebuffer plus a desktop.
 #
-# The panel is fb0 (1200x1920, 32bpp), the only pointer is sec_touchscreen and
-# its event node number moves between boots, so it is resolved by device name.
+# The panel is fb0 (1200x1920, 32bpp) and the only pointer is sec_touchscreen.
+# Its event node number moves between boots, so it is resolved by device name.
 # Everything is logged to /var/log/desktop.log because output on tty1 is
 # invisible while X owns the framebuffer.
 #
@@ -42,6 +42,16 @@ else
     echo "pixbuf cache: MISSING - icons will fail"
 fi
 
+# gdk-pixbuf picks a loader by MIME type, so the shared MIME database has to be
+# there as well. apk --no-scripts skips shared-mime-info's trigger, and without
+# /usr/share/mime/mime.cache even a valid PNG fails with "Unrecognized image file
+# format", which aborts the panel and leaves a black root window.
+if [ ! -s /usr/share/mime/mime.cache ] && command -v update-mime-database >/dev/null 2>&1; then
+    echo "generating /usr/share/mime/mime.cache"
+    update-mime-database /usr/share/mime
+fi
+echo "mime db: $( [ -s /usr/share/mime/mime.cache ] && echo present || echo MISSING )"
+
 # --------------------------------------------------------------- touch pointer
 EV=""
 for f in /sys/class/input/event*/device/name; do
@@ -54,7 +64,49 @@ done
 [ -n "$EV" ] || EV=/dev/input/event1
 echo "touchscreen: $EV"
 
-cat > /etc/X11/xorg.conf <<CONF
+# ---------------------------------------------------------------------- udev
+# libinput discovers devices through udev, and the ID_INPUT_* tags that tell it
+# "this is a touchscreen" are produced by udev's input_id builtin. Without the
+# daemon plus one coldplug pass libinput enumerates nothing and the desktop ends
+# up with no pointer at all.
+if command -v udevd >/dev/null 2>&1; then
+    mkdir -p /run/udev
+    pidof udevd >/dev/null 2>&1 || udevd --daemon 2>/dev/null
+    sleep 1
+    udevadm trigger --action=add --type=subsystems 2>/dev/null
+    udevadm trigger --action=add --type=devices 2>/dev/null
+    udevadm settle --timeout=10 2>/dev/null
+    echo "udev: $(ls /run/udev/data 2>/dev/null | wc -l) device records"
+    echo "touch tags: $(udevadm info "$EV" 2>/dev/null | grep -o 'ID_INPUT[A-Z_]*=[0-9]' | tr '\n' ' ')"
+else
+    echo "udev: not installed"
+fi
+
+# ------------------------------------------------------------------- X input
+# sec_touchscreen reports ABS_MT_POSITION_X/Y (protocol B) and no ABS_X/ABS_Y.
+# xf86-input-evdev needs the single-touch axes for an absolute device, so it
+# configures this panel as a relative mouse, ignores every touch ("evdev: touch:
+# ignoring absolute axes") and the screen does nothing when touched. libinput
+# speaks the MT protocol directly, so it is used whenever the image has it.
+if [ -e /usr/lib/xorg/modules/input/libinput_drv.so ]; then
+    TOUCH_DRIVER=libinput
+else
+    TOUCH_DRIVER=evdev
+fi
+echo "touch driver: $TOUCH_DRIVER"
+
+# The panel cannot be read back and shows no difference between "blanked" and
+# "broken", so the server is told never to blank, and the saver is disabled
+# again after X starts.
+if [ "$TOUCH_DRIVER" = "libinput" ]; then
+    cat > /etc/X11/xorg.conf <<CONF
+Section "ServerFlags"
+    Option "BlankTime" "0"
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+    Option "DontZap" "false"
+EndSection
 Section "ServerLayout"
     Identifier "layout"
     Screen "screen"
@@ -64,6 +116,41 @@ Section "Device"
     Identifier "fb"
     Driver "fbdev"
     Option "fbdev" "/dev/fb0"
+    Option "DPMS" "false"
+EndSection
+Section "Screen"
+    Identifier "screen"
+    Device "fb"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1200x1920"
+    EndSubSection
+EndSection
+Section "InputDevice"
+    Identifier "touch"
+    Driver "libinput"
+    Option "Device" "$EV"
+EndSection
+CONF
+else
+    cat > /etc/X11/xorg.conf <<CONF
+Section "ServerFlags"
+    Option "BlankTime" "0"
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+EndSection
+Section "ServerLayout"
+    Identifier "layout"
+    Screen "screen"
+    InputDevice "touch"
+EndSection
+Section "Device"
+    Identifier "fb"
+    Driver "fbdev"
+    Option "fbdev" "/dev/fb0"
+    Option "DPMS" "false"
 EndSection
 Section "Screen"
     Identifier "screen"
@@ -81,6 +168,7 @@ Section "InputDevice"
     Option "IgnoreRelativeAxes" "true"
 EndSection
 CONF
+fi
 
 # xfce4-session refuses to run without a session bus, and nothing else starts one
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
@@ -107,7 +195,37 @@ if ! kill -0 "$XPID" 2>/dev/null; then
     exit 1
 fi
 echo "Xorg up (pid $XPID)"
-grep -E '\(EE\)|\(II\) Using input driver|no screens' /var/log/Xorg.0.log 2>/dev/null | tail -10
+
+# The DECON controller keeps scanning the buffer it was left with by the
+# bootloader, so X draws into a buffer nobody displays: a live session and a
+# black screen. fb_set_var() returns early when the var is unchanged, so this
+# has to be a real change - toggling the depth back and forth makes the driver
+# reprogram DECON, after which X's output appears.
+if command -v fbset >/dev/null 2>&1; then
+    fbset -depth 32 2>/dev/null
+    fbset -depth 24 2>/dev/null
+    echo "fb mode reprogrammed: $(fbset 2>/dev/null | grep -m1 geometry)"
+fi
+
+# Second display kick once the root window exists: on some boots DECON only
+# re-reads the framebuffer after a blank/unblank cycle while something is
+# already mapped into the buffer.
+if [ -e /sys/class/graphics/fb0/blank ]; then
+    echo 1 > /sys/class/graphics/fb0/blank 2>/dev/null
+    sleep 1
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
+fi
+
+# Never let the screen blank itself: a DPMS save on this panel is
+# indistinguishable from the black-screen failure.
+if command -v xset >/dev/null 2>&1; then
+    xset s off -dpms 2>/dev/null
+    xset s noblank 2>/dev/null
+    xset dpms force on 2>/dev/null
+    echo "screensaver: $(xset q 2>/dev/null | grep -m1 -i 'timeout')"
+fi
+
+grep -E '\(EE\)|Using input driver|libinput|no screens' /var/log/Xorg.0.log 2>/dev/null | tail -12
 
 # on-screen keyboard for a tablet with no physical keyboard
 for kb in matchbox-keyboard xvkbd; do

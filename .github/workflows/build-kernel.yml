@@ -95,13 +95,15 @@ jobs:
             apk --root /rootfs --arch aarch64 --no-scripts --no-progress add \
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
-                xorg-server xf86-video-fbdev xf86-input-evdev \
+                xorg-server xf86-video-fbdev xf86-input-evdev xf86-input-libinput \
+                libinput eudev \
                 twm xterm font-misc-misc font-dejavu font-noto \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
                 adwaita-icon-theme hicolor-icon-theme shared-mime-info \
                 matchbox-keyboard dbus polkit
             ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/bin/twm
             ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
+            ls /rootfs/usr/lib/xorg/modules/input/libinput_drv.so /rootfs/sbin/udevd
             ls -d /rootfs/usr/share/icons/Adwaita
           '
 
@@ -158,6 +160,20 @@ jobs:
           grep -q 'libpixbufloader-png' /tmp/loaders.cache || echo "note: no png module (builtin in 2.42)"
           sudo install -D -m 644 /tmp/loaders.cache \
             /tmp/rootfs/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
+
+          # The loaders cache alone is not enough: gdk-pixbuf selects a loader by
+          # MIME type, so it also needs the shared MIME database. shared-mime-info's
+          # post-install trigger is skipped by --no-scripts, and with no
+          # /usr/share/mime/mime.cache even a real PNG fails with "Unrecognized
+          # image file format", which aborts the panel (Wnck default_icon_at_size)
+          # and leaves the black screen. Built the same way, from the same Alpine
+          # release, into the aarch64 rootfs.
+          docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
+            apk add --no-progress shared-mime-info >/dev/null
+            update-mime-database /rootfs/usr/share/mime
+          '
+          sudo test -s /tmp/rootfs/usr/share/mime/mime.cache
+          echo "mime db: $(sudo stat -c%s /tmp/rootfs/usr/share/mime/mime.cache) bytes"
 
           docker run --rm alpine:3.20 sh -c '
             apk add --no-progress font-misc-misc >/dev/null
