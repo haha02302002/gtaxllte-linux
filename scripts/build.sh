@@ -47,6 +47,22 @@ fi
 echo "==> busybox: $BB"
 install -m 0755 "$BB" "$ROOT/bin/busybox"
 
+# Refuse to ship a dynamically linked busybox. In a bare initramfs its
+# interpreter (/sbin/linker64 for TWRP's build) does not exist, every exec
+# fails, and the kernel panics with "No working init found".
+python3 - "$BB" <<'CHECK'
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+if d[:4] != b"ELF":
+    sys.exit("ERROR: %s is not an ELF binary" % sys.argv[1])
+phoff = struct.unpack("<Q", d[32:40])[0]
+phentsize, phnum = struct.unpack("<HH", d[54:58])
+ptypes = [struct.unpack("<I", d[phoff+i*phentsize:phoff+i*phentsize+4])[0] for i in range(phnum)]
+if 3 in ptypes:
+    sys.exit("ERROR: %s is dynamically linked (PT_INTERP); use a static build" % sys.argv[1])
+print("busybox is static (no PT_INTERP): OK")
+CHECK
+
 
 
 python3 "$HERE/tools/build_initramfs.py" "$ROOT" "$OUT/ramdisk.gz"
