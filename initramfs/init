@@ -1,8 +1,13 @@
 #!/bin/busybox sh
 # Minimal Linux bring-up init for Samsung SM-T585 (gtaxllte).
-# Runs entirely from the initramfs: no Android, no vendor userspace.
+#
+# CRITICAL: this is PID 1. It must NEVER exit, or the kernel panics with
+# "Attempted to kill init" and Samsung's watchdog (sec_watchdog.sec_pet=5
+# in the bootloader cmdline) reboots the tablet after 5 seconds, forever.
+# So: no top-level `exec`, and the shell is respawned in a loop.
 
-/bin/busybox --install -s /bin
+/bin/busybox --install -s /bin 2>/dev/null
+
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 
@@ -14,19 +19,39 @@ mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /run    2>/dev/null
 mount -t tmpfs  tmpfs  /tmp    2>/dev/null
 
-exec >/dev/tty0 2>&1
+# Pick the first console that actually exists.
+CONSOLE=/dev/console
+for c in /dev/tty0 /dev/tty1 /dev/tty2 /dev/console; do
+    if [ -c "$c" ]; then CONSOLE="$c"; break; fi
+done
+
+exec >"$CONSOLE" 2>&1
 
 echo
 echo "=================================================="
 echo "  Linux on SM-T585 (gtaxllte) - initramfs bring-up"
-echo "  kernel: $(uname -srm)"
+echo "  kernel : $(uname -srm)"
+echo "  console: $CONSOLE"
 echo "=================================================="
+echo
+echo "-- kernel command line --"
+cat /proc/cmdline
+echo
+echo "-- registered consoles (tty0 = fbcon) --"
+cat /proc/consoles 2>/dev/null
+echo
+echo "-- framebuffer --"
+cat /proc/fb 2>/dev/null || echo "(no /proc/fb)"
+ls /dev/fb* /dev/tty* 2>/dev/null | head -20
+echo
+echo "-- input devices --"
+grep -E '^(N|H):' /proc/bus/input/devices 2>/dev/null | head -20
 echo
 
 # eMMC userdata partition, if the kernel exposed it.
 DATA=
 for p in /dev/mmcblk0p23 /dev/block/mmcblk0p23; do
-    [ -b "$p" ] && DATA="$p" && break
+    if [ -b "$p" ]; then DATA="$p"; break; fi
 done
 if [ -n "$DATA" ]; then
     if mount -t ext4 -o ro "$DATA" /mnt 2>/dev/null; then
@@ -36,15 +61,20 @@ if [ -n "$DATA" ]; then
     else
         echo "[!!] could not mount $DATA"
     fi
+else
+    echo "[!!] userdata partition not found"
 fi
-
-echo
-echo "Framebuffer: $(ls /dev/fb* 2>/dev/null || echo none)"
-echo "Input devices:"
-cat /proc/bus/input/devices 2>/dev/null | grep -E '^(N|H):' | head -20
-echo
-echo "Dropping to shell on tty0. Type 'help' for busybox applets."
-echo "This is an initramfs RAM shell: nothing is written to the tablet."
 echo
 
-exec setsid sh -c 'exec sh </dev/tty0 >/dev/tty0 2>&1' || exec sh
+# Respawn the shell forever. If it dies, we log it and come back; PID 1 stays alive.
+while true; do
+    echo "=== launching shell (type 'help' for busybox applets, 'exit' to respawn) ==="
+    if [ -c /dev/tty0 ]; then
+        setsid sh -c 'exec sh </dev/tty0 >/dev/tty0 2>&1'
+    else
+        sh <"$CONSOLE" >"$CONSOLE" 2>&1
+    fi
+    echo
+    echo "=== shell exited; respawning in 3s (init stays alive) ==="
+    sleep 3
+done
