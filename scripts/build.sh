@@ -67,21 +67,32 @@ CHECK
 
 
 # ---------------------------------------------------------------- distro payload
-# An Alpine minirootfs is baked into the initramfs as /distro.tar.gz. init
-# prefers an on-disk rootfs (microSD, then rootfs.img on userdata) and only
-# unpacks this one into RAM when nothing else is found, so it costs boot time
-# and ~4 MB of the BOOT partition but nothing else.
+# An Alpine minirootfs is baked into the initramfs as the /distro tree. init
+# copies it into a tmpfs and switch_root()s into it, but only when no on-disk
+# rootfs (microSD or rootfs.img) is found, so it costs ~4 MB of the BOOT
+# partition and nothing else. It is extracted here so booting needs no tar.
 if [ "${EMBED_DISTRO:-1}" = "1" ]; then
     ALPINE_BRANCH="${ALPINE_BRANCH:-v3.20}"
     ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
     echo "==> fetching Alpine ${ALPINE_BRANCH} aarch64 minirootfs"
-    ALPINE_FILE=$(curl -fsSL "$ALPINE_MIRROR/$ALPINE_BRANCH/releases/aarch64/" 2>/dev/null         | grep -oE 'alpine-minirootfs-[0-9.]+-aarch64\.tar\.gz' | sort -uV | tail -1)
-    if [ -n "$ALPINE_FILE" ] &&        curl -fsSL -o "$ROOT/distro.tar.gz"             "$ALPINE_MIRROR/$ALPINE_BRANCH/releases/aarch64/$ALPINE_FILE" &&        gzip -t "$ROOT/distro.tar.gz"; then
-        echo "    $ALPINE_FILE ($(stat -c%s "$ROOT/distro.tar.gz") bytes)"
+    ALPINE_FILE=$(curl -fsSL "$ALPINE_MIRROR/$ALPINE_BRANCH/releases/aarch64/" 2>/dev/null | grep -oE 'alpine-minirootfs-[0-9.]+-aarch64\.tar\.gz' | sort -uV | tail -1)
+    TMP_TGZ="$OUT/alpine.tar.gz"
+    rm -rf "$ROOT/distro"
+    if [ -n "$ALPINE_FILE" ] && curl -fsSL -o "$TMP_TGZ" "$ALPINE_MIRROR/$ALPINE_BRANCH/releases/aarch64/$ALPINE_FILE" && gzip -t "$TMP_TGZ"; then
+        echo "    $ALPINE_FILE ($(stat -c%s "$TMP_TGZ") bytes), extracting"
+        mkdir -p "$ROOT/distro"
+        tar -xzf "$TMP_TGZ" -C "$ROOT/distro"
+        if [ -e "$ROOT/distro/sbin/init" ] || [ -L "$ROOT/distro/sbin/init" ]; then
+            echo "    extracted $(find "$ROOT/distro" | wc -l) entries"
+        else
+            echo "WARNING: extracted Alpine has no /sbin/init; dropping it"
+            rm -rf "$ROOT/distro"
+        fi
     else
         echo "WARNING: could not fetch Alpine; init will fall back to the shell"
-        rm -f "$ROOT/distro.tar.gz"
+        rm -rf "$ROOT/distro"
     fi
+    rm -f "$TMP_TGZ"
 fi
 
 python3 "$HERE/tools/build_initramfs.py" "$ROOT" "$OUT/ramdisk.gz"

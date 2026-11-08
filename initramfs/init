@@ -7,8 +7,13 @@
 #   1. root=/dev/... from the kernel command line (also: distro=none for shell)
 #   2. microSD card        /dev/mmcblk1p1 (ext4 / f2fs / vfat)
 #   3. rootfs.img on userdata (/dev/mmcblk0p23, vfat) via a loop device
-#   4. Alpine tarball baked into this initramfs (/distro.tar.gz, RAM only)
+#   4. Alpine tree baked into this initramfs (/distro), copied to a tmpfs (RAM)
 #   5. fallback: the busybox shell on the USB serial port
+#
+# The kernel console is deliberately NOT muted while booting: if the kernel
+# wedges in a driver, its messages simply stop, which is the only diagnosis
+# available when userspace has no way to report. It is muted just before the
+# fallback shell, which is when the sm5703 fuelgauge starts flooding.
 #
 # CRITICAL: this is PID 1. It must NEVER exit, or the kernel panics with
 # "Attempted to kill init" and Samsung's watchdog reboots after ~5s.
@@ -19,18 +24,14 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 export TERM=linux
 
-mount -t proc     proc     /proc 2>/dev/null
-mount -t sysfs    sysfs    /sys  2>/dev/null
-mount -t devtmpfs devtmpfs /dev  2>/dev/null
+echo "[init] starting (PID $$)"
+mount -t proc     proc     /proc 2>/dev/null || echo "[init] proc mount failed"
+mount -t sysfs    sysfs    /sys  2>/dev/null || echo "[init] sysfs mount failed"
+mount -t devtmpfs devtmpfs /dev  2>/dev/null || echo "[init] devtmpfs mount failed"
 mkdir -p /dev/pts /dev/shm /run /tmp /media /newroot /sys/kernel/config
 mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /run  2>/dev/null
 mount -t tmpfs  tmpfs  /tmp  2>/dev/null
-
-# The Samsung sm5703 fuelgauge has no charger power-supply partner in a bare
-# Linux userspace and retries forever, flooding the console. Keep the screen
-# for crit/emerg only; dmesg still has everything.
-dmesg -n 2 2>/dev/null
 
 CONSOLE=/dev/console
 for c in /dev/tty0 /dev/tty1 /dev/tty2 /dev/console; do
@@ -45,8 +46,9 @@ WANT_SHELL=""
 
 echo
 echo "=================================================="
-echo "  Linux on SM-T585 (gtaxllte)"
+echo "  Linux on SM-T585 (gtaxllte) - distro loader"
 echo "  kernel: $(uname -srm)"
+echo "  console: $CONSOLE"
 echo "=================================================="
 
 # ------------------------------------------------------------------ cmdline
@@ -58,8 +60,8 @@ for a in $(cat /proc/cmdline); do
 done
 
 # ------------------------------------------------------------------ USB serial
-# CDC-ACM gadget over the same cable TWRP uses for adb: gives the shell (and
-# the distro's getty) a typeable console, since tty0 has no input device.
+# CDC-ACM gadget over the same cable TWRP uses for adb: gives the shell and the
+# distro's getty a typeable console, since tty0 has no input device.
 GADGET=/sys/kernel/config/usb_gadget/g1
 
 gadget_make() {
@@ -97,6 +99,7 @@ usb_serial_setup() {
     return 0
 }
 
+echo "[init] setting up USB serial gadget"
 if usb_serial_setup; then
     i=0
     while [ $i -lt 20 ]; do
@@ -104,19 +107,19 @@ if usb_serial_setup; then
         sleep 0.5 2>/dev/null || sleep 1
         i=$((i + 1))
     done
-    [ -c /dev/ttyGS0 ] && echo "[ok] USB serial on /dev/ttyGS0" \
-                       || echo "[!!] gadget bound but /dev/ttyGS0 missing"
+    echo "[init] USB serial: $( [ -c /dev/ttyGS0 ] && echo '/dev/ttyGS0 ready' || echo 'gadget bound, no ttyGS0' )"
 else
-    echo "[!!] USB serial gadget unavailable (see dmesg | grep -i -e dwc3 -e gadget)"
+    echo "[init] USB serial gadget FAILED"
 fi
 
 # ------------------------------------------------------------------ rootfs helpers
 # Accept a candidate only if it looks like a real root filesystem, otherwise a
 # random data card would be mounted and switch_root would fail.
 accept_root() {
-    if [ -x "$NEWROOT/sbin/init" ] || [ -f "$NEWROOT/etc/os-release" ]; then
+    if [ -e "$NEWROOT/sbin/init" ] || [ -L "$NEWROOT/sbin/init" ] || [ -f "$NEWROOT/etc/os-release" ]; then
         return 0
     fi
+    echo "[..]   not a root filesystem, unmounting"
     umount "$NEWROOT" 2>/dev/null
     return 1
 }
@@ -124,6 +127,7 @@ accept_root() {
 try_root_dev() {
     for fs in ext4 f2fs vfat; do
         if mount -t "$fs" -o rw "$1" "$NEWROOT" 2>/dev/null; then
+            echo "[..]   mounted $1 as $fs"
             return 0
         fi
     done
@@ -139,44 +143,48 @@ mount_data() {
     return 1
 }
 
-loop_root() {
-    img="$1"
-    if losetup /dev/loop0 "$img" 2>/dev/null; then
-        if try_root_dev /dev/loop0; then return 0; fi
-        losetup -d /dev/loop0 2>/dev/null
-        return 1
-    fi
-    return 1
-}
-
 find_rootfs() {
-    # 1. explicit root= on the command line
+    echo "[1/4] cmdline root="
     if [ -n "$WANT_ROOT" ]; then
         if try_root_dev "$WANT_ROOT" && accept_root; then
             ROOT_HOW="cmdline $WANT_ROOT"; return 0
         fi
+    else
+        echo "[..]   none given"
     fi
 
-    # 2. microSD card
+    echo "[2/4] microSD"
     for d in /dev/mmcblk1p1 /dev/mmcblk1p2; do
-        if [ -b "$d" ] && try_root_dev "$d" && accept_root; then
-            ROOT_HOW="$d (microSD)"; return 0
+        if [ -b "$d" ]; then
+            echo "[..]   trying $d"
+            if try_root_dev "$d" && accept_root; then
+                ROOT_HOW="$d (microSD)"; return 0
+            fi
         fi
     done
+    echo "[..]   no usable card"
 
-    # 3. rootfs.img on the userdata partition, loop mounted
+    echo "[3/4] rootfs.img on userdata"
     if mount_data; then
         for img in /media/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img; do
-            if [ -f "$img" ] && loop_root "$img" && accept_root; then
-                ROOT_HOW="$img (loop)"; return 0
+            if [ -f "$img" ]; then
+                echo "[..]   found $img"
+                if losetup /dev/loop0 "$img" 2>/dev/null && try_root_dev /dev/loop0 && accept_root; then
+                    ROOT_HOW="$img (loop)"; return 0
+                fi
+                losetup -d /dev/loop0 2>/dev/null
             fi
         done
+        echo "[..]   no rootfs.img"
+    else
+        echo "[..]   could not mount userdata"
     fi
 
-    # 4. Alpine baked into this initramfs -> unpack into RAM
-    if [ -f /distro.tar.gz ]; then
+    echo "[4/4] embedded Alpine (/distro -> RAM)"
+    if [ -d /distro ]; then
         if mount -t tmpfs -o size=400M,mode=0755 tmpfs "$NEWROOT" 2>/dev/null; then
-            if tar -xzf /distro.tar.gz -C "$NEWROOT" 2>/dev/null; then
+            echo "[..]   copying rootfs into tmpfs"
+            if cp -a /distro/. "$NEWROOT/" 2>/dev/null; then
                 # The distro needs a getty on the USB gadget port, otherwise it
                 # boots with no way to log in.
                 if [ -f "$NEWROOT/etc/inittab" ] && ! grep -q ttyGS0 "$NEWROOT/etc/inittab"; then
@@ -185,37 +193,41 @@ find_rootfs() {
                 fi
                 ROOT_HOW="embedded Alpine (RAM only)"; return 0
             fi
+            echo "[!!]   copy failed"
             umount "$NEWROOT" 2>/dev/null
         fi
+    else
+        echo "[..]   no embedded distro"
     fi
     return 1
 }
 
 switch_to_root() {
+    echo "[init] moving dev/proc/sys into $NEWROOT"
     for d in dev proc sys; do
         mkdir -p "$NEWROOT/$d"
-        mount -o move "/$d" "$NEWROOT/$d" 2>/dev/null
+        mount -o move "/$d" "$NEWROOT/$d" 2>/dev/null || echo "[!!]   could not move /$d"
     done
-    echo "=== switching to $ROOT_HOW ==="
-    echo
+    echo "[init] switching to $ROOT_HOW"
+    echo "=================================================="
     exec switch_root "$NEWROOT" /sbin/init
 }
 
 # ------------------------------------------------------------------ boot
 if [ -z "$WANT_SHELL" ] && find_rootfs; then
-    if [ -x "$NEWROOT/sbin/init" ] || [ -x "$NEWROOT/bin/sh" ]; then
-        switch_to_root
-        echo "[!!] switch_root failed"
-    fi
+    switch_to_root
+    echo "[!!] switch_root failed"
 fi
 
 if [ -n "$WANT_SHELL" ]; then
-    echo "[ok] distro=none -> shell only"
+    echo "[init] distro=none -> shell only"
 else
-    echo "[--] no root filesystem found (microSD, rootfs.img, embedded distro) -> shell"
+    echo "[init] no root filesystem found -> shell"
 fi
-echo "     first thing worth running: cat /proc/cmdline"
-echo
+
+# From here on the console is quiet except for crit/emerg; the sm5703 fuelgauge
+# has no charger power-supply partner in a bare userspace and retries forever.
+dmesg -n 2 2>/dev/null
 
 # ------------------------------------------------------------ serial shell
 # Background first: the tty0 loop below blocks on input that cannot arrive.
