@@ -17,6 +17,7 @@ Zip layout:
     manifest.txt      (md5 + sizes the installer verifies)
 """
 import argparse
+import gzip
 import hashlib
 import os
 import sys
@@ -58,11 +59,20 @@ def main():
     rootfs_md5 = md5_file(args.rootfs)
     rootfs_size = os.path.getsize(args.rootfs)
 
+    # md5 of the image's first 4 KiB, i.e. the ext4 superblock. The installer
+    # compares it after writing, because this recovery's od cannot print hex.
+    with gzip.open(args.rootfs, "rb") as f:
+        sb_head = f.read(4096)
+    if len(sb_head) < 4096 or sb_head[1080:1082] != b"\x53\xef":
+        sys.exit("ERROR: %s does not start with an ext4 superblock" % args.rootfs)
+    sb_md5 = hashlib.md5(sb_head).hexdigest()
+
     manifest = "\n".join([
         "device=gtaxllte",
         "boot_md5=%s" % boot_md5,
         "boot_bytes=%d" % boot_size,
         "rootfs_md5=%s" % rootfs_md5,
+        "rootfs_sb_md5=%s" % sb_md5,
         "rootfs_gz_bytes=%d" % rootfs_size,
         "rootfs_bytes=%d" % ROOTFS_BYTES,
         "",

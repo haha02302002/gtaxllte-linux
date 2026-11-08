@@ -22,9 +22,14 @@ if ! command -v ui_print >/dev/null 2>&1; then
     ui_print() { echo "$@"; }
 fi
 
+PHASE=start
+LOG=/tmp/gtaxl-install.log
+: > "$LOG" 2>/dev/null
 fail() {
+    echo "FAIL at $PHASE: $*" >> "$LOG" 2>/dev/null
     ui_print " "
     ui_print "!! $*"
+    ui_print "!! phase: $PHASE (log: $LOG)"
     ui_print "!! nothing else was touched; TWRP is intact"
     exit 1
 }
@@ -51,10 +56,13 @@ DEVICE=$(mval device)
 BOOT_MD5=$(mval boot_md5)
 BOOT_BYTES=$(mval boot_bytes)
 ROOTFS_MD5=$(mval rootfs_md5)
+ROOTFS_SB_MD5=$(mval rootfs_sb_md5)
 ROOTFS_BYTES=$(mval rootfs_bytes)
+PHASE=manifest
 
 [ "$DEVICE" = "gtaxllte" ] || fail "this zip is not for this device (${DEVICE:-unknown})"
 [ -n "$BOOT_MD5" ] && [ -n "$BOOT_BYTES" ] || fail "manifest is incomplete"
+[ -n "$ROOTFS_MD5" ] && [ -n "$ROOTFS_SB_MD5" ] || fail "manifest is incomplete"
 
 BOOT_DEV=""
 for d in /dev/block/bootdevice/by-name/BOOT /dev/block/mmcblk0p9; do
@@ -91,12 +99,14 @@ GOT_MD5=$(md5sum "$WORK/boot.img" | cut -d' ' -f1)
 GOT_SIZE=$(wc -c < "$WORK/boot.img" | tr -d ' \r\n')
 [ "$GOT_SIZE" = "$BOOT_BYTES" ] || fail "boot.img size mismatch ($GOT_SIZE)"
 
+PHASE=kernel
 ui_print "- writing kernel to $BOOT_DEV"
 dd if="$WORK/boot.img" of="$BOOT_DEV" bs=1048576 2>/dev/null || fail "dd to BOOT failed"
 sync
 ui_print "  kernel installed: $GOT_SIZE bytes, md5 $GOT_MD5"
 
 # ------------------------------------------------------------------ rootfs
+PHASE=rootfs
 ui_print "- extracting rootfs.img.gz (this takes a minute)"
 unzip -o -q "$ZIP" rootfs.img.gz -d "$WORK" || fail "cannot extract rootfs.img.gz"
 GOT_MD5=$(md5sum "$WORK/rootfs.img.gz" | cut -d' ' -f1)
@@ -110,9 +120,11 @@ sync
 GOT_SIZE=$(wc -c < "$MEDIA/rootfs.img" | tr -d ' \r\n')
 [ "$GOT_SIZE" = "$ROOTFS_BYTES" ] || fail "rootfs.img is $GOT_SIZE bytes, expected $ROOTFS_BYTES"
 
-# The ext4 magic at offset 1080 is the cheapest proof the image is intact.
-MAGIC=$(dd if="$MEDIA/rootfs.img" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
-[ "$MAGIC" = "53ef" ] || fail "rootfs.img has no ext4 superblock (magic $MAGIC)"
+# The first 4 KiB must be byte-identical to the payload's superblock. Compared
+# by md5 because this recovery's od cannot print hex at all.
+PHASE=verify
+GOT_SB=$(dd if="$MEDIA/rootfs.img" bs=4096 count=1 2>/dev/null | md5sum | cut -d' ' -f1)
+[ "$GOT_SB" = "$ROOTFS_SB_MD5" ] || fail "rootfs.img superblock does not match the payload (got $GOT_SB)"
 ui_print "  rootfs installed: $GOT_SIZE bytes, ext4 superblock OK"
 
 rm -rf "$WORK"
