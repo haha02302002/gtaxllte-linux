@@ -82,7 +82,6 @@ cp arch/arm64/boot/Image "$OUT/Image"
 echo "==> packing boot.img"
 python3 "$HERE/tools/mkbootimg.py" \
     --kernel "$OUT/Image" \
-    --ramdisk "$OUT/ramdisk.gz" \
     --dtb "$HERE/dumps/dt.img" \
     --out "$OUT/boot.img" \
     --kernel-addr "$KERNEL_ADDR" \
