@@ -22,5 +22,20 @@ CONFIG_CMDLINE_EXTEND=y
 CONFIG_USB_GADGET=y
 CONFIG_USB_LIBCOMPOSITE=y
 CONFIG_USB_F_ACM=y
+CONFIG_USB_U_SERIAL=y
 CONFIG_USB_CONFIGFS=y
 CONFIG_USB_CONFIGFS_ACM=y
+CONFIG_USB_CONFIGFS_SERIAL=y
+# Legacy g_serial is a second, independent way to get /dev/ttyGS0;
+# harmless if it cannot bind because the configfs gadget gets there first.
+CONFIG_USB_G_SERIAL=y
+
+# The vibrator driver calls microusb/NCM helpers that only exist in Samsung's
+# full Android gadget stack (undefined reference to set_ncm_ready and
+# microusb_get_usb*_count at vmlinux link time). A serial shell has no use for
+# a vibrator, so drop it rather than pull in the whole Android USB stack.
+# CONFIG_SEC_VIB is not set
+
+# Samsung's legacy android.c composite probes the only UDC at boot, which would
+# leave the configfs gadget below unable to bind and /dev/ttyGS0 missing.
+# CONFIG_USB_G_ANDROID is not set

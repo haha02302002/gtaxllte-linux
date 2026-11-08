@@ -60,14 +60,9 @@ echo
 # over the same USB cable used for adb in TWRP. No extra hardware needed.
 GADGET=/sys/kernel/config/usb_gadget/g1
 
-usb_serial_setup() {
-    mount -t configfs none /sys/kernel/config 2>/dev/null
-    if [ ! -d /sys/kernel/config/usb_gadget ]; then
-        echo "[!!] /sys/kernel/config/usb_gadget missing (CONFIG_USB_CONFIGFS)"
-        return 1
-    fi
+gadget_make() {
     rm -rf "$GADGET" 2>/dev/null
-    mkdir -p "$GADGET" || { echo "[!!] cannot mkdir $GADGET"; return 1; }
+    mkdir -p "$GADGET" || return 1
 
     echo 0x1d6b > "$GADGET/idVendor"
     echo 0x0104 > "$GADGET/idProduct"
@@ -80,19 +75,40 @@ usb_serial_setup() {
     echo "0001"                      > "$GADGET/strings/0x409/serialnumber"
 
     mkdir -p "$GADGET/configs/c.1/strings/0x409"
-    echo "ACM"   > "$GADGET/configs/c.1/strings/0x409/configuration"
-    echo 100     > "$GADGET/configs/c.1/MaxPower"
+    echo "ACM" > "$GADGET/configs/c.1/strings/0x409/configuration"
+    echo 100   > "$GADGET/configs/c.1/MaxPower"
+    return 0
+}
 
-    mkdir -p "$GADGET/functions/acm.gs0" || { echo "[!!] no acm function"; return 1; }
-    ln -s "$GADGET/functions/acm.gs0" "$GADGET/configs/c.1/" 2>/dev/null
+usb_serial_setup() {
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    if [ ! -d /sys/kernel/config/usb_gadget ]; then
+        echo "[!!] /sys/kernel/config/usb_gadget missing (CONFIG_USB_CONFIGFS)"
+        return 1
+    fi
+    gadget_make || { echo "[!!] cannot create $GADGET"; return 1; }
+
+    # CDC-ACM is the function Windows picks up automatically as a COM port.
+    # gser is the plain-bulk fallback if the acm function was not built in.
+    if mkdir -p "$GADGET/functions/acm.gs0" 2>/dev/null && [ -d "$GADGET/functions/acm.gs0" ]; then
+        FUNC="$GADGET/functions/acm.gs0"
+        echo "[ok] function acm.gs0 (CDC-ACM)"
+    elif mkdir -p "$GADGET/functions/gser.gs0" 2>/dev/null && [ -d "$GADGET/functions/gser.gs0" ]; then
+        FUNC="$GADGET/functions/gser.gs0"
+        echo "[ok] function gser.gs0 (generic serial, no Windows driver)"
+    else
+        echo "[!!] neither acm nor gser function is available in configfs"
+        return 1
+    fi
+    ln -s "$FUNC" "$GADGET/configs/c.1/" 2>/dev/null
 
     UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
     if [ -z "$UDC" ]; then
-        echo "[!!] no UDC in /sys/class/udc - the USB controller did not register"
+        echo "[!!] no UDC in /sys/class/udc - USB controller never registered"
         return 1
     fi
-    if ! echo "$UDC" > "$GADGET/UDC"; then
-        echo "[!!] could not bind gadget to UDC $UDC"
+    if ! echo "$UDC" > "$GADGET/UDC" 2>/dev/null; then
+        echo "[!!] UDC $UDC busy (another gadget owns it: state=$(cat /sys/class/udc/$UDC/state 2>/dev/null))"
         return 1
     fi
     echo "[ok] gadget bound to UDC $UDC"
@@ -100,24 +116,23 @@ usb_serial_setup() {
 }
 
 echo "-- USB gadget --"
-echo "UDCs: $(ls /sys/class/udc 2>/dev/null | tr '\n' ' ')"
-if usb_serial_setup; then
-    i=0
-    while [ $i -lt 20 ]; do
-        [ -c /dev/ttyGS0 ] && break
-        sleep 0.5 2>/dev/null || sleep 1
-        i=$((i + 1))
-    done
-fi
+echo "UDCs : $(ls /sys/class/udc 2>/dev/null | tr '\n' ' ')"
+usb_serial_setup
+i=0
+while [ $i -lt 20 ]; do
+    [ -c /dev/ttyGS0 ] && break
+    sleep 0.5 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
 if [ -c /dev/ttyGS0 ]; then
-    echo "[ok] /dev/ttyGS0 ready - plug the tablet into a PC and open the new COM port at 115200 8N1"
+    echo "[ok] /dev/ttyGS0 ready - plug into a PC and open the new COM port at 115200 8N1"
 else
     echo "[!!] /dev/ttyGS0 did not appear"
     for u in /sys/class/udc/*; do
         [ -e "$u" ] && echo "     $(basename "$u"): state=$(cat "$u/state" 2>/dev/null)"
     done
     echo "     last USB messages:"
-    dmesg 2>/dev/null | grep -iE 'dwc3|gadget|udc|configfs|acm' | tail -12
+    dmesg 2>/dev/null | grep -iE 'dwc3|gadget|udc|configfs|acm|serial' | tail -12
 fi
 echo
 
