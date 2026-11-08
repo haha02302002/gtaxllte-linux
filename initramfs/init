@@ -251,6 +251,7 @@ switch_to_root() {
         mount -o move "/$d" "$NEWROOT/$d" 2>/dev/null || echo "[!!]   could not move /$d"
     done
     log "[init] switching to $ROOT_HOW"
+    log "[init] distro init=$(ls -l "$NEWROOT/sbin/init" 2>/dev/null | tr -s ' ') openrc=$( [ -x "$NEWROOT/sbin/openrc" ] && echo present || echo MISSING )"
     if [ -n "$LOGF" ]; then
         echo "--- kernel log up to switch_root ---" >> "$LOGF" 2>/dev/null
         dmesg >> "$LOGF" 2>/dev/null
@@ -293,6 +294,14 @@ fi
 
 # ------------------------------------------------------------ VT shell
 while true; do
+    # Live handoff trigger: with NOSWITCH the distro stays mounted at $NEWROOT,
+    # so "touch /media/GO" from the serial shell makes PID 1 (this process) do the
+    # real switch_root while the console stays attached to watch it happen.
+    if [ -f /media/GO ] && [ -e "$NEWROOT/sbin/init" ]; then
+        rm -f /media/GO
+        ROOT_HOW="prepared $NEWROOT (GO trigger)"
+        switch_to_root
+    fi
     if [ -c /dev/tty0 ]; then
         setsid -c sh -c 'exec sh -i </dev/tty0 >/dev/tty0 2>&1' </dev/tty0 >/dev/tty0 2>&1
         sleep 3
