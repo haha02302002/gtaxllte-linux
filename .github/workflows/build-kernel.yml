@@ -84,7 +84,11 @@ jobs:
           # action fails. Replace it with a busybox-only inittab that mounts the
           # pseudo filesystems, sets the hostname, and gives a getty on the USB
           # gadget port and on the screen.
-          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -L ttyGS0 115200 vt100\ntty1::respawn:/sbin/getty -L tty1 115200 vt100\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
+          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -n -l /bin/sh -L ttyGS0 115200 vt100\ntty1::respawn:/sbin/getty -L tty1 115200 vt100\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
+          # The minirootfs ships root with a locked password, so a plain login is
+          # answered with "Login incorrect"; clear the hash so root can log in on
+          # a console that has no keyboard, and let ttyGS0 autologin instead.
+          sudo sed -i 's|^root:[^:]*:|root::|' /tmp/rootfs/etc/shadow
           echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
           printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
           printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
