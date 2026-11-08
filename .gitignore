@@ -1,0 +1,6 @@
+out/
+*.img.gz
+!dumps/dt.img
+node_modules/
+.DS_Store
+tools/gh/

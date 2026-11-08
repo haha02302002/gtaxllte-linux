@@ -1,0 +1,50 @@
+#!/bin/busybox sh
+# Minimal Linux bring-up init for Samsung SM-T585 (gtaxllte).
+# Runs entirely from the initramfs: no Android, no vendor userspace.
+
+/bin/busybox --install -s /bin
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/root
+
+mount -t proc     proc     /proc  2>/dev/null
+mount -t sysfs    sysfs    /sys   2>/dev/null
+mount -t devtmpfs devtmpfs /dev   2>/dev/null
+mkdir -p /dev/pts /dev/shm /run /tmp /mnt
+mount -t devpts devpts /dev/pts 2>/dev/null
+mount -t tmpfs  tmpfs  /run    2>/dev/null
+mount -t tmpfs  tmpfs  /tmp    2>/dev/null
+
+exec >/dev/tty0 2>&1
+
+echo
+echo "=================================================="
+echo "  Linux on SM-T585 (gtaxllte) - initramfs bring-up"
+echo "  kernel: $(uname -srm)"
+echo "=================================================="
+echo
+
+# eMMC userdata partition, if the kernel exposed it.
+DATA=
+for p in /dev/mmcblk0p23 /dev/block/mmcblk0p23; do
+    [ -b "$p" ] && DATA="$p" && break
+done
+if [ -n "$DATA" ]; then
+    if mount -t ext4 -o ro "$DATA" /mnt 2>/dev/null; then
+        echo "[ok] mounted $DATA (ext4) at /mnt"
+    elif mount -t vfat -o ro "$DATA" /mnt 2>/dev/null; then
+        echo "[ok] mounted $DATA (vfat) at /mnt"
+    else
+        echo "[!!] could not mount $DATA"
+    fi
+fi
+
+echo
+echo "Framebuffer: $(ls /dev/fb* 2>/dev/null || echo none)"
+echo "Input devices:"
+cat /proc/bus/input/devices 2>/dev/null | grep -E '^(N|H):' | head -20
+echo
+echo "Dropping to shell on tty0. Type 'help' for busybox applets."
+echo "This is an initramfs RAM shell: nothing is written to the tablet."
+echo
+
+exec setsid sh -c 'exec sh </dev/tty0 >/dev/tty0 2>&1' || exec sh

@@ -1,0 +1,81 @@
+name: Build Linux kernel for SM-T585 (gtaxllte)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+    inputs:
+      enable_vt:
+        description: 'Enable virtual terminal / framebuffer console'
+        type: boolean
+        default: true
+
+env:
+  KERNEL_REPO: https://github.com/followmsi/android_kernel_samsung_exynos7870.git
+  KERNEL_BRANCH: '12'          # Linux 3.18.140
+  DEFCONFIG: lineage-gtaxllte_defconfig
+  TC_URL: https://developer.arm.com/-/media/Files/downloads/gnu-a/8.3-2019.03/binrel/gcc-arm-8.3-2019.03-x86_64-aarch64-linux-gnu.tar.xz
+  TC_DIR: /opt/aarch64-tc
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout build kit
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev python3 zip unzip \
+            ccache xz-utils cpio rsync
+
+      - name: Fetch aarch64 cross toolchain (GCC 8.3)
+        run: |
+          mkdir -p "${TC_DIR}"
+          if [ ! -x "${TC_DIR}/bin/aarch64-linux-gnu-gcc" ]; then
+            curl -fL --retry 3 -o /tmp/tc.tar.xz "${TC_URL}"
+            tar -xJf /tmp/tc.tar.xz -C "${TC_DIR}" --strip-components=1
+          fi
+          "${TC_DIR}/bin/aarch64-linux-gnu-gcc" --version | head -1
+
+      - name: Clone kernel source
+        run: |
+          git clone --depth 1 -b "${KERNEL_BRANCH}" "${KERNEL_REPO}" kernel
+          cd kernel
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile | tr '\n' ' '
+          echo
+          test -f "arch/arm64/configs/${DEFCONFIG}" || { echo "missing ${DEFCONFIG}"; exit 1; }
+
+      - name: Build kernel Image
+        run: |
+          ./scripts/build.sh
+        env:
+          CROSS_COMPILE: /opt/aarch64-tc/bin/aarch64-linux-gnu-
+          KERNEL_DIR: ${{ github.workspace }}/kernel
+          OUT: ${{ github.workspace }}/out
+          ENABLE_VT: ${{ inputs.enable_vt && '1' || '1' }}
+
+      - name: Report result
+        run: |
+          echo "### boot.img built" >> "$GITHUB_STEP_SUMMARY"
+          ls -l out/ >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          md5sum out/boot.img >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtaxllte-linux-boot
+          path: |
+            out/boot.img
+            out/Image
+            out/ramdisk.gz
+            out/config.effective
+            out/build-info.txt
+          if-no-files-found: error

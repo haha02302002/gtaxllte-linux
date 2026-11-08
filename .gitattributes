@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+initramfs/init text eol=lf
+busybox binary
+*.img binary
+*.gz binary
+*.bin binary
+*.fdt binary

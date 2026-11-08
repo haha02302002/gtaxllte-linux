@@ -1,0 +1,13 @@
+# Extra kernel config for a usable Linux userspace on gtaxllte.
+# The stock Android/TWRP kernels disable the virtual terminal, which leaves a
+# Linux kernel with no console at all (TWRP paints the framebuffer from
+# userspace instead). This fragment turns on VT + fbcon.
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_DUMMY_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FONT_8x16=y
+CONFIG_LOGO=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_CMDLINE="console=tty0 console=ttySAC2,115200"
+CONFIG_CMDLINE_EXTEND=y
