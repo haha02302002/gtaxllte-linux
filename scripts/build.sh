@@ -45,6 +45,16 @@ for a in sh mount umount cat ls echo grep head tail sleep setsid uname mkdir \
     ln -sf busybox "$ROOT/bin/$a"
 done
 
+# Fallback init paths. The kernel tries rdinit=/init, then /sbin/init,
+# /etc/init, /bin/init, /bin/sh. If binfmt_script is unavailable the /init
+# script cannot run, so also expose busybox's own init applet (an ELF) with a
+# minimal inittab, which spawns a shell without needing shell-script support.
+printf '::sysinit:/bin/sh -c "echo [inittab] busybox init reached the console"
+::askfirst:-/bin/sh
+' > "$ROOT/etc/inittab"
+ln -sf ../bin/busybox "$ROOT/sbin/init"
+ln -sf busybox "$ROOT/bin/init"
+
 python3 "$HERE/tools/build_initramfs.py" "$ROOT" "$OUT/ramdisk.gz"
 
 # ---------------------------------------------------------------- kernel
