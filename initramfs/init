@@ -23,6 +23,15 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 export TERM=linux
+LOGF=""
+
+# A boot that dies before userspace cannot report anything, and a panic takes
+# the USB gadget down with it, so keep a plain-text log on userdata instead.
+log() {
+    echo "$*"
+    [ -n "$LOGF" ] && echo "[$(cut -d' ' -f1 /proc/uptime)s] $*" >> "$LOGF" 2>/dev/null
+    return 0
+}
 
 echo "[init] starting (PID $$)"
 mount -t proc     proc     /proc 2>/dev/null || echo "[init] proc mount failed"
@@ -117,8 +126,11 @@ fi
 # random data card would be mounted and switch_root would fail.
 accept_root() {
     if [ -e "$NEWROOT/sbin/init" ] || [ -L "$NEWROOT/sbin/init" ] || [ -f "$NEWROOT/etc/os-release" ]; then
+        log "[root] accepted: $(head -2 "$NEWROOT/etc/os-release" 2>/dev/null | tr '
+' ' ')"
         return 0
     fi
+    log "[root] rejected: no /sbin/init and no /etc/os-release"
     echo "[..]   not a root filesystem, unmounting"
     umount "$NEWROOT" 2>/dev/null
     return 1
@@ -136,7 +148,10 @@ try_root_dev() {
 
 mount_data() {
     for fs in vfat ext4; do
-        if mount -t "$fs" -o ro /dev/mmcblk0p23 /media 2>/dev/null; then
+        if mount -t "$fs" -o rw /dev/mmcblk0p23 /media 2>/dev/null; then
+            LOGF=/media/boot.log
+            : > "$LOGF" 2>/dev/null
+            log "[log] progress goes to $LOGF"
             return 0
         fi
     done
@@ -146,10 +161,13 @@ mount_data() {
 loop_try() {
     img="$1"
     if losetup /dev/loop0 "$img" 2>/dev/null; then
+        log "[loop] losetup ok: $img"
         if try_root_dev /dev/loop0; then return 0; fi
+        log "[loop] could not mount /dev/loop0"
         losetup -d /dev/loop0 2>/dev/null
         return 1
     fi
+    log "[loop] losetup failed: $img"
     # busybox mount can attach the loop device by itself
     if mount -t ext4 -o loop,rw "$img" "$NEWROOT" 2>/dev/null; then
         echo "[..]   mounted via mount -o loop"
@@ -187,7 +205,15 @@ find_rootfs() {
             if [ -f "$img" ]; then
                 echo "[..]   found $img"
                 if loop_try "$img" && accept_root; then
-                    ROOT_HOW="$img (loop)"; return 0
+                    ROOT_HOW="$img (loop)"
+                    # Escape hatch: if /media/NOSWITCH exists, stop here with the
+                    # distro mounted at $NEWROOT and give the serial shell, so
+                    # the handoff can be driven by hand instead of blind.
+                    if [ -f /media/NOSWITCH ]; then
+                        log "[init] NOSWITCH found: $img left mounted at $NEWROOT"
+                        return 1
+                    fi
+                    return 0
                 fi
             fi
         done
@@ -224,7 +250,12 @@ switch_to_root() {
         mkdir -p "$NEWROOT/$d"
         mount -o move "/$d" "$NEWROOT/$d" 2>/dev/null || echo "[!!]   could not move /$d"
     done
-    echo "[init] switching to $ROOT_HOW"
+    log "[init] switching to $ROOT_HOW"
+    if [ -n "$LOGF" ]; then
+        echo "--- kernel log up to switch_root ---" >> "$LOGF" 2>/dev/null
+        dmesg >> "$LOGF" 2>/dev/null
+        echo "--- end kernel log ---" >> "$LOGF" 2>/dev/null
+    fi
     echo "=================================================="
     exec switch_root "$NEWROOT" /sbin/init
 }
