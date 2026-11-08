@@ -14,3 +14,13 @@ CONFIG_DEVTMPFS_MOUNT=y
 # silently rebooting after 5s, so the failure is readable.
 CONFIG_CMDLINE="console=tty0 console=ttySAC2,115200 panic=0 rdinit=/init"
 CONFIG_CMDLINE_EXTEND=y
+
+# USB peripheral-mode serial console. The tablet has no on-screen keyboard and a
+# VT console cannot read the touchscreen, so a shell on tty0 cannot be typed
+# into. With the configfs gadget the tablet enumerates on the attached PC as a
+# CDC-ACM "USB Serial Device" and the shell runs on /dev/ttyGS0 instead.
+CONFIG_USB_GADGET=y
+CONFIG_USB_LIBCOMPOSITE=y
+CONFIG_USB_F_ACM=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_ACM=y

@@ -4,6 +4,12 @@
 # CRITICAL: this is PID 1. It must NEVER exit, or the kernel panics with
 # "Attempted to kill init" and Samsung's watchdog reboots after ~5s.
 # So: no top-level `exec`, and the shell is respawned in a loop.
+#
+# Input: there is no on-screen keyboard, and a VT console cannot use the
+# touchscreen, so a shell on tty0 is readable but not typeable. The usable
+# shell therefore lives on a USB CDC-ACM gadget: the tablet enumerates on the
+# PC it is plugged into as "USB Serial Device (COMx)" and you type there.
+# The framebuffer console stays as a read-only status screen.
 
 /bin/busybox --install -s /bin 2>/dev/null
 
@@ -11,13 +17,13 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 export TERM=linux
 
-mount -t proc     proc     /proc  2>/dev/null
-mount -t sysfs    sysfs    /sys   2>/dev/null
-mount -t devtmpfs devtmpfs /dev   2>/dev/null
-mkdir -p /dev/pts /dev/shm /run /tmp /mnt
+mount -t proc     proc     /proc 2>/dev/null
+mount -t sysfs    sysfs    /sys  2>/dev/null
+mount -t devtmpfs devtmpfs /dev  2>/dev/null
+mkdir -p /dev/pts /dev/shm /run /tmp /mnt /sys/kernel/config
 mount -t devpts devpts /dev/pts 2>/dev/null
-mount -t tmpfs  tmpfs  /run    2>/dev/null
-mount -t tmpfs  tmpfs  /tmp    2>/dev/null
+mount -t tmpfs  tmpfs  /run  2>/dev/null
+mount -t tmpfs  tmpfs  /tmp  2>/dev/null
 
 # The Samsung sm5703 fuelgauge has no charger power-supply device in a bare
 # Linux userspace and retries forever, flooding the console with
@@ -48,10 +54,74 @@ echo
 echo "-- framebuffer --"
 cat /proc/fb 2>/dev/null || echo "(no /proc/fb)"
 echo
-echo "-- input devices --"
-grep -E '^(N|H):' /proc/bus/input/devices 2>/dev/null | head -20 || echo "(none yet)"
+
+# ------------------------------------------------------------------ USB serial
+# Build a CDC-ACM gadget through configfs so the tablet presents a serial port
+# over the same USB cable used for adb in TWRP. No extra hardware needed.
+GADGET=/sys/kernel/config/usb_gadget/g1
+
+usb_serial_setup() {
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    if [ ! -d /sys/kernel/config/usb_gadget ]; then
+        echo "[!!] /sys/kernel/config/usb_gadget missing (CONFIG_USB_CONFIGFS)"
+        return 1
+    fi
+    rm -rf "$GADGET" 2>/dev/null
+    mkdir -p "$GADGET" || { echo "[!!] cannot mkdir $GADGET"; return 1; }
+
+    echo 0x1d6b > "$GADGET/idVendor"
+    echo 0x0104 > "$GADGET/idProduct"
+    echo 0x0100 > "$GADGET/bcdDevice"
+    echo 0x0200 > "$GADGET/bcdUSB"
+
+    mkdir -p "$GADGET/strings/0x409"
+    echo "gtaxllte-linux"             > "$GADGET/strings/0x409/manufacturer"
+    echo "SM-T585 USB serial console" > "$GADGET/strings/0x409/product"
+    echo "0001"                      > "$GADGET/strings/0x409/serialnumber"
+
+    mkdir -p "$GADGET/configs/c.1/strings/0x409"
+    echo "ACM"   > "$GADGET/configs/c.1/strings/0x409/configuration"
+    echo 100     > "$GADGET/configs/c.1/MaxPower"
+
+    mkdir -p "$GADGET/functions/acm.gs0" || { echo "[!!] no acm function"; return 1; }
+    ln -s "$GADGET/functions/acm.gs0" "$GADGET/configs/c.1/" 2>/dev/null
+
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+    if [ -z "$UDC" ]; then
+        echo "[!!] no UDC in /sys/class/udc - the USB controller did not register"
+        return 1
+    fi
+    if ! echo "$UDC" > "$GADGET/UDC"; then
+        echo "[!!] could not bind gadget to UDC $UDC"
+        return 1
+    fi
+    echo "[ok] gadget bound to UDC $UDC"
+    return 0
+}
+
+echo "-- USB gadget --"
+echo "UDCs: $(ls /sys/class/udc 2>/dev/null | tr '\n' ' ')"
+if usb_serial_setup; then
+    i=0
+    while [ $i -lt 20 ]; do
+        [ -c /dev/ttyGS0 ] && break
+        sleep 0.5 2>/dev/null || sleep 1
+        i=$((i + 1))
+    done
+fi
+if [ -c /dev/ttyGS0 ]; then
+    echo "[ok] /dev/ttyGS0 ready - plug the tablet into a PC and open the new COM port at 115200 8N1"
+else
+    echo "[!!] /dev/ttyGS0 did not appear"
+    for u in /sys/class/udc/*; do
+        [ -e "$u" ] && echo "     $(basename "$u"): state=$(cat "$u/state" 2>/dev/null)"
+    done
+    echo "     last USB messages:"
+    dmesg 2>/dev/null | grep -iE 'dwc3|gadget|udc|configfs|acm' | tail -12
+fi
 echo
 
+# ---------------------------------------------------------------- data (ro)
 DATA=
 for p in /dev/mmcblk0p23 /dev/block/mmcblk0p23; do
     if [ -b "$p" ]; then DATA="$p"; break; fi
@@ -66,23 +136,37 @@ if [ -n "$DATA" ]; then
     fi
 fi
 echo
-echo "Shell needs a USB OTG keyboard - there is no on-screen keyboard here."
+echo "Type into the shell from the PC: Windows -> PuTTY, Serial, the new COMx, 115200 8N1."
 echo "Everything is in RAM; a reboot discards all changes."
 echo
 
-# Respawn the shell forever. `setsid -c` makes the shell a session leader with
-# /dev/tty0 as its controlling terminal, which is what gives working job
-# control (otherwise sh prints "can't access tty; job control turned off").
+# ------------------------------------------------------------ serial shell
+# Started first and in the background: the tty0 loop below blocks on input that
+# can never arrive, so it must not run before this.
+if [ -c /dev/ttyGS0 ]; then
+    (
+        while true; do
+            # setsid -c makes this a session leader that takes ttyGS0 as its
+            # controlling terminal, which is what gives working job control.
+            # stdin is already ttyGS0 so TIOCSCTTY acts on the right device.
+            TERM=vt100 setsid -c sh -c 'exec sh -i </dev/ttyGS0 >/dev/ttyGS0 2>&1' \
+                </dev/ttyGS0 >/dev/ttyGS0 2>&1
+            sleep 1
+        done
+    ) &
+    echo "=== shell running on ttyGS0 (USB serial) ==="
+else
+    echo "=== no USB serial port, falling back to tty0 only ==="
+fi
+
+# ------------------------------------------------------------ VT shell
+# Respawn forever. `setsid -c` with tty0 as stdin gives the shell a controlling
+# terminal, so it does not print "can't access tty; job control turned off".
 while true; do
-    echo "=== launching shell on tty0 ('help' for applets, 'exit' to respawn) ==="
     if [ -c /dev/tty0 ]; then
-        if ! setsid -c sh -c 'exec sh -i </dev/tty0 >/dev/tty0 2>&1'; then
-            sh -i </dev/tty0 >/dev/tty0 2>&1
-        fi
+        setsid -c sh -c 'exec sh -i </dev/tty0 >/dev/tty0 2>&1' </dev/tty0 >/dev/tty0 2>&1
+        sleep 3
     else
-        sh -i <"$CONSOLE" >"$CONSOLE" 2>&1
+        sleep 10
     fi
-    echo
-    echo "=== shell exited (status $?); respawning in 3s ==="
-    sleep 3
 done
