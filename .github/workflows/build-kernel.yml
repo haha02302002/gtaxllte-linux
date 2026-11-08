@@ -96,7 +96,7 @@ jobs:
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
                 xorg-server xf86-video-fbdev xf86-input-evdev \
-                xorg-twm xterm font-misc-misc font-dejavu font-noto \
+                twm xterm font-misc-misc font-dejavu font-noto \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
                 adwaita-icon-theme hicolor-icon-theme shared-mime-info \
                 matchbox-keyboard dbus polkit

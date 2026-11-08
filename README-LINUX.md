@@ -269,7 +269,7 @@ docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
       xorg-server xf86-video-fbdev xf86-input-evdev xfce4 xfce4-terminal \
-      xfce4-screenshooter xfce4-panel xorg-twm xterm font-misc-misc \
+      xfce4-screenshooter xfce4-panel twm xterm font-misc-misc \
       font-dejavu font-noto matchbox-keyboard dbus polkit \
       adwaita-icon-theme hicolor-icon-theme shared-mime-info'
 ```
