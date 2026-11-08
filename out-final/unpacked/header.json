@@ -1,0 +1,19 @@
+{
+  "file": "boot.img",
+  "file_size": 23758848,
+  "kernel_size": 23397360,
+  "kernel_addr": "0x10008000",
+  "ramdisk_size": 0,
+  "ramdisk_addr": "0x11000000",
+  "second_size": 0,
+  "tags_addr": "0x10000100",
+  "page_size": 2048,
+  "header_version": 0,
+  "os_version": "0x0",
+  "name": "",
+  "cmdline": "console=tty0 console=ttySAC2,115200 panic=0 rdinit=/init",
+  "extra_cmdline": "",
+  "id": "31160af41edff6f798a201b61d1376f3f1d12060000000000000000000000000",
+  "next_block_head": "445442480200000003000000be1e0000",
+  "trailing_fdt_offset": 23402496
+}
