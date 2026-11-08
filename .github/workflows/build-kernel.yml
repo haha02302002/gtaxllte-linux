@@ -85,7 +85,7 @@ jobs:
           # Services come from our own inittab, not openrc, so the skipped scripts
           # are not needed.
           #
-          # xorg-twm/font-misc-misc/adwaita-icon-theme are not optional: XFCE's
+          # font-misc-misc/adwaita-icon-theme are not optional: XFCE's
           # panel, xfdesktop and libwnck abort at startup when no icon theme and
           # no PNG decoding are available, which shows up as a black screen with
           # only a root window. They pull the pieces XFCE expects on a normal
@@ -102,7 +102,7 @@ jobs:
                 matchbox-keyboard dbus polkit
             ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/bin/twm
             ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
-            ls /rootfs/usr/share/icons/adwaita
+            ls -d /rootfs/usr/share/icons/Adwaita
           '
 
           # image fixups: unlocked root, busybox inittab, hostname, resolv, fstab
@@ -141,7 +141,9 @@ jobs:
           done
 
           echo "--- icon theme + X core fonts ---"
-          sudo test -d /tmp/rootfs/usr/share/icons/adwaita
+          ICONS=$(sudo find /tmp/rootfs/usr/share/icons -maxdepth 1 -iname 'adwaita*' | head -1)
+          echo "icon theme: ${ICONS#/tmp/rootfs}"
+          sudo test -n "$ICONS" && sudo test -d "$ICONS"
           sudo test -s /tmp/rootfs/usr/share/fonts/misc/fonts.dir
 
           echo "--- build the gdk-pixbuf loader cache (aarch64 binary, qemu) ---"
@@ -150,7 +152,7 @@ jobs:
           echo "cache entries: $(sudo grep -c '^"' /tmp/rootfs/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache)"
 
           echo "--- PNG decoding (this is what broke the panel) ---"
-          PNG=$(sudo find /tmp/rootfs/usr/share/icons/adwaita -name '*.png' | head -1)
+          PNG=$(sudo find ${ICONS:-/tmp/rootfs/usr/share/icons} -name '*.png' | head -1)
           echo "sample: ${PNG#/tmp/rootfs}"
           sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static \
               /usr/bin/gdk-pixbuf-thumbnailer "${PNG#/tmp/rootfs}" /tmp/png-check.png
