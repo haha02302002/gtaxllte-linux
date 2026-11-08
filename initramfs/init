@@ -1,15 +1,17 @@
 #!/bin/busybox sh
-# Minimal Linux bring-up init for Samsung SM-T585 (gtaxllte).
+# PID 1 for the SM-T585 (gtaxllte) Linux bring-up.
+#
+# This is a boot *loader*, not an OS: it finds a root filesystem, then
+# switch_root()s into it. Order of preference:
+#
+#   1. root=/dev/... from the kernel command line (also: distro=none for shell)
+#   2. microSD card        /dev/mmcblk1p1 (ext4 / f2fs / vfat)
+#   3. rootfs.img on userdata (/dev/mmcblk0p23, vfat) via a loop device
+#   4. Alpine tarball baked into this initramfs (/distro.tar.gz, RAM only)
+#   5. fallback: the busybox shell on the USB serial port
 #
 # CRITICAL: this is PID 1. It must NEVER exit, or the kernel panics with
 # "Attempted to kill init" and Samsung's watchdog reboots after ~5s.
-# So: no top-level `exec`, and the shell is respawned in a loop.
-#
-# Input: there is no on-screen keyboard, and a VT console cannot use the
-# touchscreen, so a shell on tty0 is readable but not typeable. The usable
-# shell therefore lives on a USB CDC-ACM gadget: the tablet enumerates on the
-# PC it is plugged into as "USB Serial Device (COMx)" and you type there.
-# The framebuffer console stays as a read-only status screen.
 
 /bin/busybox --install -s /bin 2>/dev/null
 
@@ -20,60 +22,57 @@ export TERM=linux
 mount -t proc     proc     /proc 2>/dev/null
 mount -t sysfs    sysfs    /sys  2>/dev/null
 mount -t devtmpfs devtmpfs /dev  2>/dev/null
-mkdir -p /dev/pts /dev/shm /run /tmp /mnt /sys/kernel/config
+mkdir -p /dev/pts /dev/shm /run /tmp /media /newroot /sys/kernel/config
 mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /run  2>/dev/null
 mount -t tmpfs  tmpfs  /tmp  2>/dev/null
 
-# The Samsung sm5703 fuelgauge has no charger power-supply device in a bare
-# Linux userspace and retries forever, flooding the console with
-# "Fail to get psy (sm5703-charger)". Raise the console loglevel so only
-# crit/emerg reach the screen; dmesg still holds everything.
+# The Samsung sm5703 fuelgauge has no charger power-supply partner in a bare
+# Linux userspace and retries forever, flooding the console. Keep the screen
+# for crit/emerg only; dmesg still has everything.
 dmesg -n 2 2>/dev/null
 
 CONSOLE=/dev/console
 for c in /dev/tty0 /dev/tty1 /dev/tty2 /dev/console; do
     if [ -c "$c" ]; then CONSOLE="$c"; break; fi
 done
-
 exec >"$CONSOLE" 2>&1
 
+NEWROOT=/newroot
+ROOT_HOW=""
+WANT_ROOT=""
+WANT_SHELL=""
+
 echo
 echo "=================================================="
-echo "  Linux on SM-T585 (gtaxllte) - initramfs bring-up"
-echo "  kernel : $(uname -srm)"
-echo "  console: $CONSOLE"
+echo "  Linux on SM-T585 (gtaxllte)"
+echo "  kernel: $(uname -srm)"
 echo "=================================================="
-echo
-echo "-- kernel command line --"
-cat /proc/cmdline
-echo
-echo "-- registered consoles (tty0 = fbcon) --"
-cat /proc/consoles 2>/dev/null
-echo
-echo "-- framebuffer --"
-cat /proc/fb 2>/dev/null || echo "(no /proc/fb)"
-echo
+
+# ------------------------------------------------------------------ cmdline
+for a in $(cat /proc/cmdline); do
+    case "$a" in
+        root=/dev/*)               WANT_ROOT="${a#root=}" ;;
+        distro=none|distro=shell)  WANT_SHELL=1 ;;
+    esac
+done
 
 # ------------------------------------------------------------------ USB serial
-# Build a CDC-ACM gadget through configfs so the tablet presents a serial port
-# over the same USB cable used for adb in TWRP. No extra hardware needed.
+# CDC-ACM gadget over the same cable TWRP uses for adb: gives the shell (and
+# the distro's getty) a typeable console, since tty0 has no input device.
 GADGET=/sys/kernel/config/usb_gadget/g1
 
 gadget_make() {
     rm -rf "$GADGET" 2>/dev/null
     mkdir -p "$GADGET" || return 1
-
     echo 0x1d6b > "$GADGET/idVendor"
     echo 0x0104 > "$GADGET/idProduct"
     echo 0x0100 > "$GADGET/bcdDevice"
     echo 0x0200 > "$GADGET/bcdUSB"
-
     mkdir -p "$GADGET/strings/0x409"
     echo "gtaxllte-linux"             > "$GADGET/strings/0x409/manufacturer"
     echo "SM-T585 USB serial console" > "$GADGET/strings/0x409/product"
     echo "0001"                      > "$GADGET/strings/0x409/serialnumber"
-
     mkdir -p "$GADGET/configs/c.1/strings/0x409"
     echo "ACM" > "$GADGET/configs/c.1/strings/0x409/configuration"
     echo 100   > "$GADGET/configs/c.1/MaxPower"
@@ -82,101 +81,158 @@ gadget_make() {
 
 usb_serial_setup() {
     mount -t configfs none /sys/kernel/config 2>/dev/null
-    if [ ! -d /sys/kernel/config/usb_gadget ]; then
-        echo "[!!] /sys/kernel/config/usb_gadget missing (CONFIG_USB_CONFIGFS)"
-        return 1
-    fi
-    gadget_make || { echo "[!!] cannot create $GADGET"; return 1; }
-
-    # CDC-ACM is the function Windows picks up automatically as a COM port.
-    # gser is the plain-bulk fallback if the acm function was not built in.
+    [ -d /sys/kernel/config/usb_gadget ] || return 1
+    gadget_make || return 1
     if mkdir -p "$GADGET/functions/acm.gs0" 2>/dev/null && [ -d "$GADGET/functions/acm.gs0" ]; then
         FUNC="$GADGET/functions/acm.gs0"
-        echo "[ok] function acm.gs0 (CDC-ACM)"
     elif mkdir -p "$GADGET/functions/gser.gs0" 2>/dev/null && [ -d "$GADGET/functions/gser.gs0" ]; then
         FUNC="$GADGET/functions/gser.gs0"
-        echo "[ok] function gser.gs0 (generic serial, no Windows driver)"
     else
-        echo "[!!] neither acm nor gser function is available in configfs"
         return 1
     fi
     ln -s "$FUNC" "$GADGET/configs/c.1/" 2>/dev/null
-
     UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
-    if [ -z "$UDC" ]; then
-        echo "[!!] no UDC in /sys/class/udc - USB controller never registered"
-        return 1
-    fi
-    if ! echo "$UDC" > "$GADGET/UDC" 2>/dev/null; then
-        echo "[!!] UDC $UDC busy (another gadget owns it: state=$(cat /sys/class/udc/$UDC/state 2>/dev/null))"
-        return 1
-    fi
-    echo "[ok] gadget bound to UDC $UDC"
+    [ -n "$UDC" ] || return 1
+    echo "$UDC" > "$GADGET/UDC" 2>/dev/null || return 1
     return 0
 }
 
-echo "-- USB gadget --"
-echo "UDCs : $(ls /sys/class/udc 2>/dev/null | tr '\n' ' ')"
-usb_serial_setup
-i=0
-while [ $i -lt 20 ]; do
-    [ -c /dev/ttyGS0 ] && break
-    sleep 0.5 2>/dev/null || sleep 1
-    i=$((i + 1))
-done
-if [ -c /dev/ttyGS0 ]; then
-    echo "[ok] /dev/ttyGS0 ready - plug into a PC and open the new COM port at 115200 8N1"
-else
-    echo "[!!] /dev/ttyGS0 did not appear"
-    for u in /sys/class/udc/*; do
-        [ -e "$u" ] && echo "     $(basename "$u"): state=$(cat "$u/state" 2>/dev/null)"
+if usb_serial_setup; then
+    i=0
+    while [ $i -lt 20 ]; do
+        [ -c /dev/ttyGS0 ] && break
+        sleep 0.5 2>/dev/null || sleep 1
+        i=$((i + 1))
     done
-    echo "     last USB messages:"
-    dmesg 2>/dev/null | grep -iE 'dwc3|gadget|udc|configfs|acm|serial' | tail -12
+    [ -c /dev/ttyGS0 ] && echo "[ok] USB serial on /dev/ttyGS0" \
+                       || echo "[!!] gadget bound but /dev/ttyGS0 missing"
+else
+    echo "[!!] USB serial gadget unavailable (see dmesg | grep -i -e dwc3 -e gadget)"
 fi
-echo
 
-# ---------------------------------------------------------------- data (ro)
-DATA=
-for p in /dev/mmcblk0p23 /dev/block/mmcblk0p23; do
-    if [ -b "$p" ]; then DATA="$p"; break; fi
-done
-if [ -n "$DATA" ]; then
-    if mount -t ext4 -o ro "$DATA" /mnt 2>/dev/null; then
-        echo "[ok] mounted $DATA (ext4) at /mnt"
-    elif mount -t vfat -o ro "$DATA" /mnt 2>/dev/null; then
-        echo "[ok] mounted $DATA (vfat) at /mnt"
-    else
-        echo "[!!] could not mount $DATA"
+# ------------------------------------------------------------------ rootfs helpers
+# Accept a candidate only if it looks like a real root filesystem, otherwise a
+# random data card would be mounted and switch_root would fail.
+accept_root() {
+    if [ -x "$NEWROOT/sbin/init" ] || [ -f "$NEWROOT/etc/os-release" ]; then
+        return 0
+    fi
+    umount "$NEWROOT" 2>/dev/null
+    return 1
+}
+
+try_root_dev() {
+    for fs in ext4 f2fs vfat; do
+        if mount -t "$fs" -o rw "$1" "$NEWROOT" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+mount_data() {
+    for fs in vfat ext4; do
+        if mount -t "$fs" -o ro /dev/mmcblk0p23 /media 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+loop_root() {
+    img="$1"
+    if losetup /dev/loop0 "$img" 2>/dev/null; then
+        if try_root_dev /dev/loop0; then return 0; fi
+        losetup -d /dev/loop0 2>/dev/null
+        return 1
+    fi
+    return 1
+}
+
+find_rootfs() {
+    # 1. explicit root= on the command line
+    if [ -n "$WANT_ROOT" ]; then
+        if try_root_dev "$WANT_ROOT" && accept_root; then
+            ROOT_HOW="cmdline $WANT_ROOT"; return 0
+        fi
+    fi
+
+    # 2. microSD card
+    for d in /dev/mmcblk1p1 /dev/mmcblk1p2; do
+        if [ -b "$d" ] && try_root_dev "$d" && accept_root; then
+            ROOT_HOW="$d (microSD)"; return 0
+        fi
+    done
+
+    # 3. rootfs.img on the userdata partition, loop mounted
+    if mount_data; then
+        for img in /media/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img; do
+            if [ -f "$img" ] && loop_root "$img" && accept_root; then
+                ROOT_HOW="$img (loop)"; return 0
+            fi
+        done
+    fi
+
+    # 4. Alpine baked into this initramfs -> unpack into RAM
+    if [ -f /distro.tar.gz ]; then
+        if mount -t tmpfs -o size=400M,mode=0755 tmpfs "$NEWROOT" 2>/dev/null; then
+            if tar -xzf /distro.tar.gz -C "$NEWROOT" 2>/dev/null; then
+                # The distro needs a getty on the USB gadget port, otherwise it
+                # boots with no way to log in.
+                if [ -f "$NEWROOT/etc/inittab" ] && ! grep -q ttyGS0 "$NEWROOT/etc/inittab"; then
+                    echo 'ttyGS0::respawn:/sbin/getty -L ttyGS0 115200 vt100' \
+                        >> "$NEWROOT/etc/inittab"
+                fi
+                ROOT_HOW="embedded Alpine (RAM only)"; return 0
+            fi
+            umount "$NEWROOT" 2>/dev/null
+        fi
+    fi
+    return 1
+}
+
+switch_to_root() {
+    for d in dev proc sys; do
+        mkdir -p "$NEWROOT/$d"
+        mount -o move "/$d" "$NEWROOT/$d" 2>/dev/null
+    done
+    echo "=== switching to $ROOT_HOW ==="
+    echo
+    exec switch_root "$NEWROOT" /sbin/init
+}
+
+# ------------------------------------------------------------------ boot
+if [ -z "$WANT_SHELL" ] && find_rootfs; then
+    if [ -x "$NEWROOT/sbin/init" ] || [ -x "$NEWROOT/bin/sh" ]; then
+        switch_to_root
+        echo "[!!] switch_root failed"
     fi
 fi
-echo
-echo "Type into the shell from the PC: Windows -> PuTTY, Serial, the new COMx, 115200 8N1."
-echo "Everything is in RAM; a reboot discards all changes."
+
+if [ -n "$WANT_SHELL" ]; then
+    echo "[ok] distro=none -> shell only"
+else
+    echo "[--] no root filesystem found (microSD, rootfs.img, embedded distro) -> shell"
+fi
+echo "     first thing worth running: cat /proc/cmdline"
 echo
 
 # ------------------------------------------------------------ serial shell
-# Started first and in the background: the tty0 loop below blocks on input that
-# can never arrive, so it must not run before this.
+# Background first: the tty0 loop below blocks on input that cannot arrive.
 if [ -c /dev/ttyGS0 ]; then
     (
         while true; do
-            # setsid -c makes this a session leader that takes ttyGS0 as its
-            # controlling terminal, which is what gives working job control.
-            # stdin is already ttyGS0 so TIOCSCTTY acts on the right device.
+            # setsid -c makes this a session leader owning ttyGS0, which is what
+            # gives working job control; stdin is ttyGS0 so TIOCSCTTY targets it.
             TERM=vt100 setsid -c sh -c 'exec sh -i </dev/ttyGS0 >/dev/ttyGS0 2>&1' \
                 </dev/ttyGS0 >/dev/ttyGS0 2>&1
             sleep 1
         done
     ) &
     echo "=== shell running on ttyGS0 (USB serial) ==="
-else
-    echo "=== no USB serial port, falling back to tty0 only ==="
 fi
 
 # ------------------------------------------------------------ VT shell
-# Respawn forever. `setsid -c` with tty0 as stdin gives the shell a controlling
-# terminal, so it does not print "can't access tty; job control turned off".
 while true; do
     if [ -c /dev/tty0 ]; then
         setsid -c sh -c 'exec sh -i </dev/tty0 >/dev/tty0 2>&1' </dev/tty0 >/dev/tty0 2>&1
