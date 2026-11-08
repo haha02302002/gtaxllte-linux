@@ -92,8 +92,8 @@ jobs:
                 xorg-server xf86-video-fbdev xf86-input-evdev \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
                 twm xterm matchbox-keyboard font-dejavu font-noto dbus polkit
-            du -sh /rootfs/usr/share/xfce4 2>/dev/null || true
-            ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
+            ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg
+            ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
           '
 
           # image fixups: unlocked root, busybox inittab, hostname, resolv, fstab
@@ -102,7 +102,7 @@ jobs:
           echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
           printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
           printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
-          sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts /tmp/rootfs/etc/X11 /tmp/rootfs/root/.config
+          sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts /tmp/rootfs/etc/X11
 
           # Start X on the framebuffer with the touchscreen as the pointer. The event
           # node number moves between boots, so it is resolved by device name.
@@ -112,8 +112,8 @@ jobs:
           exec >/dev/tty1 2>&1
           export HOME=/root DISPLAY=:0
           export XDG_RUNTIME_DIR=/run/xdg
-          mkdir -p /run/xdg && chmod 700 /run/xdg
-          mkdir -p /etc/X11 /var/log
+          mkdir -p /run/xdg /etc/X11
+          chmod 700 /run/xdg
 
           EV=$(grep -l sec_touchscreen /sys/class/input/event*/device/name 2>/dev/null | head -1)
           EV=/dev/input/$(basename "${EV:-event1}")
@@ -148,10 +148,9 @@ jobs:
 
           Xorg :0 vt1 -keeptty -nolisten tcp &
           sleep 4
-          # on-screen keyboard: whichever of these is installed
-for kb in matchbox-keyboard xvkbd; do
-    command -v "$kb" >/dev/null 2>&1 && { "$kb" >/dev/null 2>&1 & break; }
-done
+          for kb in matchbox-keyboard xvkbd; do
+              command -v "$kb" >/dev/null 2>&1 && { "$kb" >/dev/null 2>&1 & break; }
+          done
           if [ -x /usr/bin/startxfce4 ]; then
               exec startxfce4
           elif [ -x /usr/bin/twm ]; then
@@ -163,7 +162,7 @@ done
           GUI
           sudo chmod 755 /tmp/rootfs/usr/local/bin/start-gui
 
-          # autologin root into an XFCE session when X is started from tty1
+          # autologin into XFCE when X is started from tty1 as root
           sudo tee /tmp/rootfs/root/.xinitrc >/dev/null <<'XINIT'
           #!/bin/sh
           exec startxfce4
