@@ -71,7 +71,7 @@ CHECK
 # copies it into a tmpfs and switch_root()s into it, but only when no on-disk
 # rootfs (microSD or rootfs.img) is found, so it costs ~4 MB of the BOOT
 # partition and nothing else. It is extracted here so booting needs no tar.
-if [ "${EMBED_DISTRO:-1}" = "1" ]; then
+if [ "${EMBED_DISTRO:-0}" = "1" ]; then
     ALPINE_BRANCH="${ALPINE_BRANCH:-v3.20}"
     ALPINE_MIRROR="${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
     echo "==> fetching Alpine ${ALPINE_BRANCH} aarch64 minirootfs"

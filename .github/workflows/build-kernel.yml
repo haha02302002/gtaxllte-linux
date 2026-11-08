@@ -10,6 +10,10 @@ on:
         description: 'Enable virtual terminal / framebuffer console'
         type: boolean
         default: true
+      embed_distro:
+        description: 'Embed the Alpine minirootfs into the initramfs (RAM boot)'
+        type: boolean
+        default: false
 
 env:
   KERNEL_REPO: https://github.com/followmsi/android_kernel_samsung_exynos7870.git
@@ -59,6 +63,7 @@ jobs:
           KERNEL_DIR: ${{ github.workspace }}/kernel
           OUT: ${{ github.workspace }}/out
           ENABLE_VT: ${{ inputs.enable_vt && '1' || '1' }}
+          EMBED_DISTRO: ${{ inputs.embed_distro && '1' || '0' }}
 
       - name: Report result
         run: |
