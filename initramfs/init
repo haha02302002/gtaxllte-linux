@@ -183,7 +183,7 @@ find_rootfs() {
     if mount_data; then
         # Explicit paths first, then globs: /sdcard is /data/media on some
         # TWRP builds and /data/media/0 on others, so do not assume a depth.
-        for img in /media/rootfs.img /media/media/rootfs.img \n                   /media/media/0/rootfs.img /media/0/rootfs.img \n                   /media/linux/rootfs.img /media/rootfs/rootfs.img \n                   /media/*/rootfs.img /media/*/*/rootfs.img; do
+        for img in /media/rootfs.img /media/media/rootfs.img /media/media/0/rootfs.img /media/0/rootfs.img /media/linux/rootfs.img /media/rootfs/rootfs.img /media/*/rootfs.img /media/*/*/rootfs.img; do
             if [ -f "$img" ]; then
                 echo "[..]   found $img"
                 if loop_try "$img" && accept_root; then
