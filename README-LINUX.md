@@ -269,8 +269,9 @@ docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
       --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
       xorg-server xf86-video-fbdev xf86-input-evdev xfce4 xfce4-terminal \
-      xfce4-screenshooter xfce4-panel twm xterm matchbox-keyboard \
-      font-dejavu font-noto dbus polkit'
+      xfce4-screenshooter xfce4-panel xorg-twm xterm font-misc-misc \
+      font-dejavu font-noto matchbox-keyboard dbus polkit \
+      adwaita-icon-theme hicolor-icon-theme shared-mime-info'
 ```
 
 `apk --arch aarch64` only extracts, so it runs fine on x86; `--no-scripts` is
@@ -288,7 +289,7 @@ the image build installs) brings the GUI up:
 | Pointer | `evdev` on the `sec_touchscreen` node, resolved by reading `/sys/class/input/event*/device/name` (the numbers move between boots) |
 | Session bus | `dbus-daemon --session --fork --print-address`; `xfce4-session` refuses to start without one |
 | Keyboard | `matchbox-keyboard` on screen, since the tablet has no physical keyboard |
-| Session | `startxfce4`, falling back to `xterm` + `twm` if XFCE is missing |
+| Session | `startxfce4`, watched: if `xfce4-panel`/`xfdesktop` are not running after 15 s it falls back to `twm` + `xterm`, which need no pixbuf at all |
 | Log | `/var/log/desktop.log` (tty1 output is invisible without a screen) |
 
 The USB console stays a root shell on `ttyGS0`, so `ps`, `dmesg` and
@@ -360,6 +361,8 @@ kernel. Restore it with:
 | `(EE) evdev: touch: Unable to open evdev device "/dev/input/name"` | The event node was taken from `basename` of the sysfs *file* (`.../event1/device/name` → `name`) | Fixed in `scripts/start-gui.sh`: take the basename of the event *directory* |
 | GUI starts, dies, and tty1 never comes back | busybox init disables a respawning action after 5 fast restarts, and `xfce4-session` exits immediately without a session bus | `start-gui.sh` starts `dbus-daemon --session` first and sleeps 5 s before X |
 | `(EE) AIGLX error: dlopen of .../swrast_dri.so failed` | No Mesa DRI driver in the image and fbdev is not DRI2 capable | Cosmetic: the desktop is unaccelerated |
+| Kernel logs scroll, then the screen goes black and stays black | X took over `/dev/fb0` but the session never painted: `apk --no-scripts` skips gdk-pixbuf's `loaders.cache` trigger, so **no image loader is registered**, GTK cannot decode a single PNG and `xfce4-panel`/`xfdesktop` abort on `Wnck:ERROR: default_icon_at_size` / `Gtk:ERROR: ensure_surface_for_gicon` | Image build now generates `loaders.cache` with the aarch64 binary under qemu and fails if PNG decoding does not work; `start-gui.sh` rebuilds the cache at boot and hands the console back with the error if X cannot draw |
+| XFCE aborts, `xterm` says `cannot load font "-misc-fixed-..."` | `font-misc-misc` (X core fonts for xterm) was never installed, and `adwaita-icon-theme` was missing so libwnck has no default icon | Both are in the image package list now |
 | `reboot` from the Alpine shell powers the tablet off | Reset does not survive this PMIC/bootloader combination | Press Power, or reboot from TWRP (`adb reboot`) |
 
 Drop `/media/NOSWITCH` on userdata to make the loader stop with the distro mounted

@@ -36,7 +36,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison flex libssl-dev libelf-dev python3 zip unzip \
-            ccache xz-utils cpio rsync e2fsprogs
+            ccache xz-utils cpio rsync e2fsprogs qemu-user-static
 
       - name: Fetch aarch64 cross toolchain (GCC 8.3)
         run: |
@@ -84,16 +84,25 @@ jobs:
           # and --no-scripts skips the aarch64 binaries this x86 container cannot run.
           # Services come from our own inittab, not openrc, so the skipped scripts
           # are not needed.
+          #
+          # xorg-twm/font-misc-misc/adwaita-icon-theme are not optional: XFCE's
+          # panel, xfdesktop and libwnck abort at startup when no icon theme and
+          # no PNG decoding are available, which shows up as a black screen with
+          # only a root window. They pull the pieces XFCE expects on a normal
+          # Alpine desktop install.
           docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
             set -e
             apk --root /rootfs --arch aarch64 --no-scripts --no-progress add \
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
                 --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
                 xorg-server xf86-video-fbdev xf86-input-evdev \
+                xorg-twm xterm font-misc-misc font-dejavu font-noto \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
-                twm xterm matchbox-keyboard font-dejavu font-noto dbus polkit
-            ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg
+                adwaita-icon-theme hicolor-icon-theme shared-mime-info \
+                matchbox-keyboard dbus polkit
+            ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/bin/twm
             ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
+            ls /rootfs/usr/share/icons/adwaita
           '
 
           # image fixups: unlocked root, busybox inittab, hostname, resolv, fstab
@@ -115,6 +124,47 @@ jobs:
           XINIT
           sudo chmod 755 /tmp/rootfs/root/.xinitrc
 
+      # Everything above is cross-arch file shuffling. qemu-aarch64 lets the real
+      # target binaries run here, so the desktop stack is verified before it is
+      # ever flashed: apk --no-scripts cannot run post-install steps, and one of
+      # them (the gdk-pixbuf loader cache) is what makes icons and XFCE work.
+      - name: Verify desktop stack with qemu-aarch64
+        run: |
+          set -euo pipefail
+          sudo cp /usr/bin/qemu-aarch64-static /tmp/rootfs/usr/bin/qemu-aarch64-static
+
+          echo "--- required binaries ---"
+          for b in /usr/bin/startxfce4 /usr/bin/xfwm4 /usr/bin/xfdesktop \
+                   /usr/bin/xfce4-panel /usr/bin/twm /usr/bin/xterm /usr/bin/Xorg; do
+            sudo test -x "/tmp/rootfs$b" || { echo "MISSING $b"; exit 1; }
+            echo "ok $b"
+          done
+
+          echo "--- icon theme + X core fonts ---"
+          sudo test -d /tmp/rootfs/usr/share/icons/adwaita
+          sudo test -s /tmp/rootfs/usr/share/fonts/misc/fonts.dir
+
+          echo "--- build the gdk-pixbuf loader cache (aarch64 binary, qemu) ---"
+          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/gdk-pixbuf-query-loaders --update-cache
+          sudo test -s /tmp/rootfs/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
+          echo "cache entries: $(sudo grep -c '^"' /tmp/rootfs/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache)"
+
+          echo "--- PNG decoding (this is what broke the panel) ---"
+          PNG=$(sudo find /tmp/rootfs/usr/share/icons/adwaita -name '*.png' | head -1)
+          echo "sample: ${PNG#/tmp/rootfs}"
+          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static \
+              /usr/bin/gdk-pixbuf-thumbnailer "${PNG#/tmp/rootfs}" /tmp/png-check.png
+          sudo test -s /tmp/rootfs/tmp/png-check.png || { echo "PNG DECODE BROKEN"; exit 1; }
+          echo "png decode ok ($(sudo stat -c%s /tmp/rootfs/tmp/png-check.png) bytes)"
+
+          echo "--- XFCE binaries resolve their libraries ---"
+          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/xfce4-panel --version
+          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/xfdesktop --version
+
+      - name: Build ext4 rootfs image
+        run: |
+          set -euo pipefail
+          sudo rm -f /tmp/rootfs/usr/bin/qemu-aarch64-static /tmp/rootfs/tmp/png-check.png
           rm -f out/rootfs.img out/rootfs.img.gz
           sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 2048M
           echo "image bytes: $(stat -c%s out/rootfs.img)"
