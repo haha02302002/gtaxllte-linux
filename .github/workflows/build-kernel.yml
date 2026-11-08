@@ -144,7 +144,17 @@ jobs:
           ICONS=$(sudo find /tmp/rootfs/usr/share/icons -maxdepth 1 -iname 'adwaita*' | head -1)
           echo "icon theme: ${ICONS#/tmp/rootfs}"
           sudo test -n "$ICONS" && sudo test -d "$ICONS"
-          sudo test -s /tmp/rootfs/usr/share/fonts/misc/fonts.dir
+          FONTS=$(sudo find /tmp/rootfs/usr/share/fonts -name '*.pcf*' | head -1)
+          echo "x core font: ${FONTS#/tmp/rootfs}"
+          sudo test -n "$FONTS"
+
+          # --no-scripts skips the fontconfig cache and the X core font index
+          # (mkfontdir), which xterm and the X server need at runtime.
+          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/fc-cache -f || true
+          for f in /tmp/rootfs/usr/share/fonts/misc /tmp/rootfs/usr/share/fonts/TTF; do
+            sudo test -d "$f" || continue
+            sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/mkfontdir "${f#/tmp/rootfs}" || true
+          done
 
           echo "--- build the gdk-pixbuf loader cache (aarch64 binary, qemu) ---"
           sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/gdk-pixbuf-query-loaders --update-cache
@@ -160,8 +170,13 @@ jobs:
           echo "png decode ok ($(sudo stat -c%s /tmp/rootfs/tmp/png-check.png) bytes)"
 
           echo "--- XFCE binaries resolve their libraries ---"
-          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/xfce4-panel --version
-          sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static /usr/bin/xfdesktop --version
+          for b in xfce4-panel xfdesktop xfwm4; do
+            out=$(sudo chroot /tmp/rootfs /usr/bin/qemu-aarch64-static "/usr/bin/$b" --version 2>&1) || true
+            echo "$b: $out"
+            case "$out" in
+              *"error while loading shared libraries"*) echo "BROKEN LIBRARIES in $b"; exit 1 ;;
+            esac
+          done
 
       - name: Build ext4 rootfs image
         run: |
