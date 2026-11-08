@@ -229,7 +229,7 @@ On this tablet TWRP's `/sdcard` is `/data/media` (there is no per-user `0/`
 directory like on most phones), so the pushed file shows up as
 `/media/media/rootfs.img` once the loader mounts userdata at `/media`. The
 loader checks that path, `/media/rootfs.img`, and a couple of globs, so putting
-it at `/sdcard/rootfs.img` is enough. The image is 1 GiB
+it at `/sdcard/rootfs.img` is enough. The image is 2 GiB
 ext4 labelled `alpine`; on first boot the loader prints `[3/4]`, finds the image,
 loop-mounts it and reports `switching to … (loop)`. The USB gadget console then
 autologins as root — no login prompt, no password.
@@ -246,7 +246,7 @@ uname -a                -> Linux gtaxllte 3.18.140-followmsi+ #1 SMP PREEMPT aar
 cat /etc/shadow | head  -> root:::0:::::
 apk --version           -> apk-tools 2.14.4, compiled for aarch64
 /sys/class/graphics/fb0 -> 1200,1920 @ 32bpp
-df -h /                 -> 1 GiB ext4 on /dev/loop0, persistent
+df -h /                 -> 2 GiB ext4 on /dev/loop0, persistent
 ```
 
 The `root` password is cleared in the image because the minirootfs ships it
@@ -255,6 +255,46 @@ a console that has no keyboard. Give it a password with `passwd` once inside.
 
 Everything installed with `apk add` persists, because it is a real ext4 image on
 userdata.
+
+### Desktop: XFCE on the framebuffer with touch input
+
+The tablet has no usable network (`qcacld` probes but has no firmware, so there
+is no `wlan0`), which means the desktop can never be installed from inside it.
+The CI image build unpacks the aarch64 packages into the rootfs from an x86
+`alpine:3.20` container instead:
+
+```sh
+docker run --rm -v /tmp/rootfs:/rootfs alpine:3.20 sh -c '
+  apk --root /rootfs --arch aarch64 --no-scripts add \
+      --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main \
+      --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community \
+      xorg-server xf86-video-fbdev xf86-input-evdev xfce4 xfce4-terminal \
+      xfce4-screenshooter xfce4-panel twm xterm matchbox-keyboard \
+      font-dejavu font-noto dbus polkit'
+```
+
+`apk --arch aarch64` only extracts, so it runs fine on x86; `--no-scripts` is
+required because the container cannot execute aarch64 maintainer scripts, and it
+is harmless here since services come from the generated busybox inittab rather
+than from OpenRC. Two names must exist in v3.20 — `xvkbd` and `ttf-dejavu` do
+not, and one unknown name makes apk reject the whole request.
+
+`tty1::respawn:/usr/local/bin/start-gui` (source: `scripts/start-gui.sh`, which
+the image build installs) brings the GUI up:
+
+| Step | Detail |
+|---|---|
+| Display | Xorg `fbdev` on `/dev/fb0`, 1200x1920x24, `-keeptty -nolisten tcp` |
+| Pointer | `evdev` on the `sec_touchscreen` node, resolved by reading `/sys/class/input/event*/device/name` (the numbers move between boots) |
+| Session bus | `dbus-daemon --session --fork --print-address`; `xfce4-session` refuses to start without one |
+| Keyboard | `matchbox-keyboard` on screen, since the tablet has no physical keyboard |
+| Session | `startxfce4`, falling back to `xterm` + `twm` if XFCE is missing |
+| Log | `/var/log/desktop.log` (tty1 output is invisible without a screen) |
+
+The USB console stays a root shell on `ttyGS0`, so `ps`, `dmesg` and
+`/var/log/Xorg.0.log` remain reachable while the desktop is up. `reboot` from
+inside Alpine powers the tablet off rather than restarting it (same PMIC issue as
+the loader shell) — press Power, or reboot from TWRP with `adb reboot`.
 
 ### Alpine's minirootfs is a chroot image, not a bootable system
 
@@ -317,6 +357,10 @@ kernel. Restore it with:
 | Tablet powers off instead of rebooting when `reboot` is run from the loader shell | The reset does not survive on this PMIC/bootloader combination | Press Power to boot it again |
 | Concentrated fuel-gauge spam (`sec_bat_cisd_check: Fail to sm5703-fuelgauge get`) | No charger power-supply partner in a bare Linux userspace | Cosmetic; the loader drops the console loglevel to crit for the shell only |
 | `FMCS IS RESOURCE DUMP DUMP END` is the last line on screen | The framebuffer console stops updating there in every boot, including working ones | Not a failure sign — ignore it and watch the USB serial console instead |
+| `(EE) evdev: touch: Unable to open evdev device "/dev/input/name"` | The event node was taken from `basename` of the sysfs *file* (`.../event1/device/name` → `name`) | Fixed in `scripts/start-gui.sh`: take the basename of the event *directory* |
+| GUI starts, dies, and tty1 never comes back | busybox init disables a respawning action after 5 fast restarts, and `xfce4-session` exits immediately without a session bus | `start-gui.sh` starts `dbus-daemon --session` first and sleeps 5 s before X |
+| `(EE) AIGLX error: dlopen of .../swrast_dri.so failed` | No Mesa DRI driver in the image and fbdev is not DRI2 capable | Cosmetic: the desktop is unaccelerated |
+| `reboot` from the Alpine shell powers the tablet off | Reset does not survive this PMIC/bootloader combination | Press Power, or reboot from TWRP (`adb reboot`) |
 
 Drop `/media/NOSWITCH` on userdata to make the loader stop with the distro mounted
 at `/newroot` and hand over the serial shell instead of switching; from there
