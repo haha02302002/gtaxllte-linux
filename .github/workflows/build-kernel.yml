@@ -106,61 +106,7 @@ jobs:
 
           # Start X on the framebuffer with the touchscreen as the pointer. The event
           # node number moves between boots, so it is resolved by device name.
-          sudo tee /tmp/rootfs/usr/local/bin/start-gui >/dev/null <<'GUI'
-          #!/bin/sh
-          # tty1 respawn target: bring up X on the framebuffer, then a desktop.
-          exec >/dev/tty1 2>&1
-          export HOME=/root DISPLAY=:0
-          export XDG_RUNTIME_DIR=/run/xdg
-          mkdir -p /run/xdg /etc/X11
-          chmod 700 /run/xdg
-
-          EV=$(grep -l sec_touchscreen /sys/class/input/event*/device/name 2>/dev/null | head -1)
-          EV=/dev/input/$(basename "${EV:-event1}")
-          echo "touchscreen: $EV"
-
-          cat > /etc/X11/xorg.conf <<CONF
-          Section "ServerLayout"
-              Identifier "layout"
-              Screen "screen"
-              InputDevice "touch"
-          EndSection
-          Section "Device"
-              Identifier "fb"
-              Driver "fbdev"
-              Option "fbdev" "/dev/fb0"
-          EndSection
-          Section "Screen"
-              Identifier "screen"
-              Device "fb"
-              DefaultDepth 24
-              SubSection "Display"
-                  Depth 24
-                  Modes "1200x1920"
-              EndSubSection
-          EndSection
-          Section "InputDevice"
-              Identifier "touch"
-              Driver "evdev"
-              Option "Device" "$EV"
-          EndSection
-          CONF
-
-          Xorg :0 vt1 -keeptty -nolisten tcp &
-          sleep 4
-          for kb in matchbox-keyboard xvkbd; do
-              command -v "$kb" >/dev/null 2>&1 && { "$kb" >/dev/null 2>&1 & break; }
-          done
-          if [ -x /usr/bin/startxfce4 ]; then
-              exec startxfce4
-          elif [ -x /usr/bin/twm ]; then
-              xterm -geometry 80x30+40+200 &
-              exec twm
-          else
-              exec xterm
-          fi
-          GUI
-          sudo chmod 755 /tmp/rootfs/usr/local/bin/start-gui
+          sudo install -m 755 scripts/start-gui.sh /tmp/rootfs/usr/local/bin/start-gui
 
           # autologin into XFCE when X is started from tty1 as root
           sudo tee /tmp/rootfs/root/.xinitrc >/dev/null <<'XINIT'
