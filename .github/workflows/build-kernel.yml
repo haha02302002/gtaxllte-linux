@@ -186,8 +186,21 @@ jobs:
         run: |
           set -euo pipefail
           rm -f out/rootfs.img out/rootfs.img.gz
-          sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -d /tmp/rootfs out/rootfs.img 2048M
+          # No metadata_csum: this 3.18 kernel cannot validate ext4 metadata
+          # checksums, so the first write from the running system leaves a bad
+          # superblock checksum and the loader can no longer mount the image
+          # ("invalid superblock checksum. Run e2fsck?").
+          # This image is mounted by Linux 3.18. metadata_csum is fatal there: the
+          # first read-write mount rewrites the superblock with a checksum this
+          # kernel will not accept again, so the NEXT boot refuses the mount
+          # ("invalid superblock checksum") and drops to the loader shell. The
+          # feature set is therefore pinned explicitly and verified below.
+          sudo mke2fs -q -t ext4 -F -L alpine -b 4096 -I 256 \
+            -O ^metadata_csum,^metadata_csum_seed,^64bit,^orphan_file,^bigalloc,^quota,^project,^ea_inode,^casefold,^encrypt,^verity,^fast_commit,^inline_data,^sparse_super2 \
+            -E lazy_itable_init=0,lazy_journal_init=0 \
+            -d /tmp/rootfs out/rootfs.img 2048M
           echo "image bytes: $(stat -c%s out/rootfs.img)"
+          python3 tools/check_rootfs_sb.py out/rootfs.img
           sudo e2fsck -fn out/rootfs.img || true
           gzip -9 out/rootfs.img
           echo "gz bytes: $(stat -c%s out/rootfs.img.gz)"
@@ -219,4 +232,21 @@ jobs:
         with:
           name: alpine-rootfs
           path: out/rootfs.img.gz
+          if-no-files-found: error
+
+      # One file the tablet can flash from TWRP: kernel plus rootfs, streamed by
+      # a shell installer, so a single flash brings a dead tablet back.
+      - name: Build TWRP flashable zip
+        run: |
+          set -euo pipefail
+          python3 tools/make_twrp_zip.py \
+            --boot out/boot.img \
+            --rootfs out/rootfs.img.gz \
+            --out out/gtaxllte-linux-twrp.zip
+
+      - name: Upload TWRP flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtaxllte-linux-twrp
+          path: out/gtaxllte-linux-twrp.zip
           if-no-files-found: error

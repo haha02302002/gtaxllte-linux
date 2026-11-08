@@ -42,6 +42,15 @@ mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /run  2>/dev/null
 mount -t tmpfs  tmpfs  /tmp  2>/dev/null
 
+# The Samsung bootloader passes oops=panic. In a bare Linux userspace an
+# unrelated driver oops is not worth killing a working desktop over, and the
+# panic it forces hides the message that would explain it. Keep oopses
+# non-fatal and record them to userdata instead (see log_kmsg).
+if [ -w /proc/sys/kernel/panic_on_oops ]; then
+    echo 0 > /proc/sys/kernel/panic_on_oops 2>/dev/null
+    echo "[init] panic_on_oops=$(cat /proc/sys/kernel/panic_on_oops 2>/dev/null)"
+fi
+
 CONSOLE=/dev/console
 for c in /dev/tty0 /dev/tty1 /dev/tty2 /dev/console; do
     if [ -c "$c" ]; then CONSOLE="$c"; break; fi
@@ -146,12 +155,37 @@ try_root_dev() {
     return 1
 }
 
+# An oops or a panic must survive the reboot: once userdata is mounted the kernel
+# ring buffer is streamed to a file there, so the message that killed a boot can
+# be read from TWRP afterwards. Without it a panic is only ever visible on the
+# tablet's own screen and is gone by the next boot.
+KMSGLOG=""
+log_kmsg() {
+    [ -n "$KMSGLOG" ] && return 0
+    [ -e /dev/kmsg ] || return 1
+    KMSGLOG=/media/kmsg.log
+    rm -f "$KMSGLOG" 2>/dev/null
+    {
+        while true; do
+            cat /dev/kmsg >> "$KMSGLOG" 2>/dev/null
+            sleep 2
+            if [ "$(wc -c < "$KMSGLOG" 2>/dev/null || echo 0)" -gt 4000000 ]; then
+                mv "$KMSGLOG" "$KMSGLOG.old" 2>/dev/null
+                : > "$KMSGLOG"
+            fi
+        done
+    } &
+    log "[log] kernel messages go to $KMSGLOG"
+    return 0
+}
+
 mount_data() {
     for fs in vfat ext4; do
         if mount -t "$fs" -o rw /dev/mmcblk0p23 /media 2>/dev/null; then
             LOGF=/media/boot.log
             : > "$LOGF" 2>/dev/null
             log "[log] progress goes to $LOGF"
+            log_kmsg
             return 0
         fi
     done
@@ -163,7 +197,8 @@ loop_try() {
     if losetup /dev/loop0 "$img" 2>/dev/null; then
         log "[loop] losetup ok: $img"
         if try_root_dev /dev/loop0; then return 0; fi
-        log "[loop] could not mount /dev/loop0"
+        log "[loop] could not mount /dev/loop0: $(dmesg 2>/dev/null | tail -3 | tr '\n' ' ')"
+        echo "[!!]   $img is present but this kernel cannot mount it (see above)"
         losetup -d /dev/loop0 2>/dev/null
         return 1
     fi

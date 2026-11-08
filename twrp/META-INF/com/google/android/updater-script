@@ -1,0 +1,4 @@
+# This zip is installed by META-INF/com/google/android/update-binary, a
+# /sbin/sh script: writing a 23 MB kernel to a block device and stream
+# decompressing a 2 GB image are not expressible in edify. TWRP only requires
+# this file to exist.

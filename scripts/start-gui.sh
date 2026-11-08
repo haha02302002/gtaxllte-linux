@@ -178,6 +178,16 @@ fi
 echo "dbus: ${DBUS_SESSION_BUS_ADDRESS:-none}"
 
 # ------------------------------------------------------------------------ X
+# DECON keeps scanning whatever buffer the bootloader left it with, so the first
+# X frame can land in memory nobody displays: a live session and a black screen.
+# fb_set_var() returns early when the var is unchanged, so the depth is nudged
+# back and forth - here, BEFORE X opens fb0 and before anything is mapped.
+if command -v fbset >/dev/null 2>&1; then
+    fbset -depth 32 2>/dev/null
+    fbset -depth 24 2>/dev/null
+    echo "fb mode: $(fbset 2>/dev/null | grep -m1 geometry)"
+fi
+
 Xorg :0 vt1 -keeptty -nolisten tcp &
 XPID=$!
 sleep 5
@@ -196,25 +206,11 @@ if ! kill -0 "$XPID" 2>/dev/null; then
 fi
 echo "Xorg up (pid $XPID)"
 
-# The DECON controller keeps scanning the buffer it was left with by the
-# bootloader, so X draws into a buffer nobody displays: a live session and a
-# black screen. fb_set_var() returns early when the var is unchanged, so this
-# has to be a real change - toggling the depth back and forth makes the driver
-# reprogram DECON, after which X's output appears.
-if command -v fbset >/dev/null 2>&1; then
-    fbset -depth 32 2>/dev/null
-    fbset -depth 24 2>/dev/null
-    echo "fb mode reprogrammed: $(fbset 2>/dev/null | grep -m1 geometry)"
-fi
-
-# Second display kick once the root window exists: on some boots DECON only
-# re-reads the framebuffer after a blank/unblank cycle while something is
-# already mapped into the buffer.
-if [ -e /sys/class/graphics/fb0/blank ]; then
-    echo 1 > /sys/class/graphics/fb0/blank 2>/dev/null
-    sleep 1
-    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
-fi
+# No framebuffer pokes here, deliberately. fbset -depth and fb0/blank both make
+# the DECON driver reallocate the buffer it has already handed to X, while X
+# keeps drawing into the old memory: that oopses in the fb driver, and the
+# bootloader's oops=panic turns it into a kernel panic. The mode is nudged once
+# before X starts instead (see above), which is safe.
 
 # Never let the screen blank itself: a DPMS save on this panel is
 # indistinguishable from the black-screen failure.

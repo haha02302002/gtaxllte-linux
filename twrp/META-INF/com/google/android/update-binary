@@ -1,0 +1,126 @@
+#!/sbin/sh
+# TWRP installer for the SM-T585 (gtaxllte) Linux port.
+#
+# Writes the kernel to BOOT and the Alpine/XFCE image to userdata, in one
+# flash. Everything is streamed, so the ~600 MB payload never needs temporary
+# space beyond the target file itself.
+#
+#   boot.img      -> /dev/block/bootdevice/by-name/BOOT  (mmcblk0p9, 32 MiB)
+#   rootfs.img.gz -> <userdata>/media/rootfs.img         (loop-mounted by the
+#                    initramfs loader on the next boot)
+#
+# RECOVERY (TWRP itself) is never touched, so a bad flash is always recoverable
+# with Power + VolDown + Home.
+
+set -u
+
+ZIP="${3:-/tmp/gtaxllte-linux-twrp.zip}"
+
+# TWRP normally provides ui_print; fall back to plain output so this script also
+# works when run by hand from an adb shell.
+if ! command -v ui_print >/dev/null 2>&1; then
+    ui_print() { echo "$@"; }
+fi
+
+fail() {
+    ui_print " "
+    ui_print "!! $*"
+    ui_print "!! nothing else was touched; TWRP is intact"
+    exit 1
+}
+
+ui_print "=========================================="
+ui_print " Linux for SM-T585 (gtaxllte)"
+ui_print " kernel + Alpine/XFCE rootfs"
+ui_print "=========================================="
+
+[ -f "$ZIP" ] || fail "installer cannot find the zip ($ZIP)"
+command -v unzip >/dev/null 2>&1 || fail "no unzip in this recovery"
+
+WORK=/tmp/gtaxl-install
+rm -rf "$WORK"
+mkdir -p "$WORK" || fail "cannot create $WORK"
+
+# ------------------------------------------------------------------ manifest
+unzip -o -q "$ZIP" manifest.txt -d "$WORK" || fail "cannot read manifest.txt from the zip"
+# Plain parsing on purpose: the manifest is data, not shell to be sourced.
+mval() {
+    grep "^$1=" "$WORK/manifest.txt" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r\n'
+}
+DEVICE=$(mval device)
+BOOT_MD5=$(mval boot_md5)
+BOOT_BYTES=$(mval boot_bytes)
+ROOTFS_MD5=$(mval rootfs_md5)
+ROOTFS_BYTES=$(mval rootfs_bytes)
+
+[ "$DEVICE" = "gtaxllte" ] || fail "this zip is not for this device (${DEVICE:-unknown})"
+[ -n "$BOOT_MD5" ] && [ -n "$BOOT_BYTES" ] || fail "manifest is incomplete"
+
+BOOT_DEV=""
+for d in /dev/block/bootdevice/by-name/BOOT /dev/block/mmcblk0p9; do
+    if [ -e "$d" ]; then BOOT_DEV="$d"; break; fi
+done
+[ -n "$BOOT_DEV" ] || fail "no BOOT partition found"
+
+# ------------------------------------------------------------------ mount data
+# The rootfs lives on the USERDATA partition (vfat here), which the loader
+# mounts at boot; TWRP may not have mounted it yet.
+DATA_MNT=/mnt/gtaxl-data
+if [ ! -d /data/media ]; then
+    mkdir -p "$DATA_MNT"
+    for fs in vfat ext4; do
+        mount -t "$fs" /dev/block/bootdevice/by-name/USERDATA "$DATA_MNT" 2>/dev/null && break
+    done
+fi
+if [ -d /data/media ]; then
+    MEDIA=/data/media
+elif [ -d "$DATA_MNT/media" ]; then
+    MEDIA="$DATA_MNT/media"
+elif [ -d "$DATA_MNT" ] && mountpoint -q "$DATA_MNT" 2>/dev/null; then
+    MEDIA="$DATA_MNT"
+else
+    fail "cannot mount USERDATA"
+fi
+ui_print "- userdata: $MEDIA"
+
+# ------------------------------------------------------------------ kernel
+ui_print "- extracting boot.img"
+unzip -o -q "$ZIP" boot.img -d "$WORK" || fail "cannot extract boot.img"
+GOT_MD5=$(md5sum "$WORK/boot.img" | cut -d' ' -f1)
+[ "$GOT_MD5" = "$BOOT_MD5" ] || fail "boot.img md5 mismatch ($GOT_MD5)"
+GOT_SIZE=$(wc -c < "$WORK/boot.img" | tr -d ' \r\n')
+[ "$GOT_SIZE" = "$BOOT_BYTES" ] || fail "boot.img size mismatch ($GOT_SIZE)"
+
+ui_print "- writing kernel to $BOOT_DEV"
+dd if="$WORK/boot.img" of="$BOOT_DEV" bs=1048576 2>/dev/null || fail "dd to BOOT failed"
+sync
+ui_print "  kernel installed: $GOT_SIZE bytes, md5 $GOT_MD5"
+
+# ------------------------------------------------------------------ rootfs
+ui_print "- extracting rootfs.img.gz (this takes a minute)"
+unzip -o -q "$ZIP" rootfs.img.gz -d "$WORK" || fail "cannot extract rootfs.img.gz"
+GOT_MD5=$(md5sum "$WORK/rootfs.img.gz" | cut -d' ' -f1)
+[ "$GOT_MD5" = "$ROOTFS_MD5" ] || fail "rootfs.img.gz md5 mismatch ($GOT_MD5)"
+ui_print "  payload verified (md5 $GOT_MD5)"
+
+ui_print "- expanding to $MEDIA/rootfs.img"
+rm -f "$MEDIA/rootfs.img"
+gzip -dc "$WORK/rootfs.img.gz" > "$MEDIA/rootfs.img" || fail "gzip failed (corrupt payload or disk full)"
+sync
+GOT_SIZE=$(wc -c < "$MEDIA/rootfs.img" | tr -d ' \r\n')
+[ "$GOT_SIZE" = "$ROOTFS_BYTES" ] || fail "rootfs.img is $GOT_SIZE bytes, expected $ROOTFS_BYTES"
+
+# The ext4 magic at offset 1080 is the cheapest proof the image is intact.
+MAGIC=$(dd if="$MEDIA/rootfs.img" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+[ "$MAGIC" = "53ef" ] || fail "rootfs.img has no ext4 superblock (magic $MAGIC)"
+ui_print "  rootfs installed: $GOT_SIZE bytes, ext4 superblock OK"
+
+rm -rf "$WORK"
+sync
+
+ui_print " "
+ui_print "- done: kernel + rootfs installed"
+ui_print "- RECOVERY (TWRP) untouched"
+ui_print "- reboot to start Linux; XFCE comes up on the panel"
+ui_print "=========================================="
+exit 0
