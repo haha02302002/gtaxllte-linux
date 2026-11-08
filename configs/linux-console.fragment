@@ -26,9 +26,6 @@ CONFIG_USB_U_SERIAL=y
 CONFIG_USB_CONFIGFS=y
 CONFIG_USB_CONFIGFS_ACM=y
 CONFIG_USB_CONFIGFS_SERIAL=y
-# Legacy g_serial is a second, independent way to get /dev/ttyGS0;
-# harmless if it cannot bind because the configfs gadget gets there first.
-CONFIG_USB_G_SERIAL=y
 
 # The vibrator driver calls microusb/NCM helpers that only exist in Samsung's
 # full Android gadget stack (undefined reference to set_ncm_ready and

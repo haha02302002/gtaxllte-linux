@@ -76,6 +76,41 @@ make ARCH=$ARCH CROSS_COMPILE="$CROSS_COMPILE" "$DEFCONFIG"
 echo "==> merging console/VT fragment"
 scripts/kconfig/merge_config.sh -m .config "$HERE/configs/linux-console.fragment"
 
+# --------------------------------------------------------- USB hw-param stubs
+# Samsung's USB "hw param" helpers are called from unrelated drivers
+# (sec_vib.c, bts-exynos7870.c, usb/notify/usb_notify_sysfs.c) but implemented
+# in parts of the full Android USB stack that this kernel does not build:
+# set_ncm_ready() comes from u_ncm.c (needs CONFIG_USB_F_NCM) and the
+# microusb_get_usb*_count() counters from an out-of-tree microusb driver. They
+# only feed diagnostic counters, so no-op definitions are correct here and stop
+# the vmlinux link from failing on every driver that happens to call them.
+echo "==> adding USB hw-param stubs"
+STUB_DIR="$KERNEL_DIR/drivers/usb/gadget"
+cat > "$STUB_DIR/gtaxl_usb_stub.c" <<'STUBSRC'
+/*
+ * No-op definitions for Samsung USB "hw param" helper symbols. See build.sh.
+ * Do not enable CONFIG_USB_F_NCM together with this file: u_ncm.c defines
+ * set_ncm_ready() as well and the link would fail on a duplicate symbol.
+ */
+#include <linux/types.h>
+
+void set_ncm_ready(bool ready)
+{
+}
+
+int microusb_get_usb310_count(void)
+{
+	return 0;
+}
+
+int microusb_get_usb210_count(void)
+{
+	return 0;
+}
+STUBSRC
+grep -q 'gtaxl_usb_stub.o' "$STUB_DIR/Makefile" ||     echo 'obj-y += gtaxl_usb_stub.o' >> "$STUB_DIR/Makefile"
+
+
 if [ "${EMBED_INITRAMFS:-1}" = "1" ]; then
     echo "==> embedding initramfs from $ROOT"
     scripts/config --set-str CONFIG_INITRAMFS_SOURCE "$ROOT"
