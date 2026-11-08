@@ -1,11 +1,3 @@
-* text=auto eol=lf
-*.sh text eol=lf
-*.py text eol=lf
-*.yml text eol=lf
-*.md text eol=lf
-initramfs/init text eol=lf
-busybox binary
-*.img binary
-*.gz binary
-*.bin binary
-*.fdt binary
+# Kernel patches must stay byte-exact LF: CRLF makes git apply reject them and
+# shifts patch(1) offsets. This repo is edited from Windows.
+*.patch text eol=lf

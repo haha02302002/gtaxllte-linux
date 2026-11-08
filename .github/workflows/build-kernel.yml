@@ -69,13 +69,17 @@ jobs:
           P="${GITHUB_WORKSPACE}/patches/0001-panel-survive-fb_blank.patch"
           test -f "$P" || { echo "missing $P"; exit 1; }
           cd kernel
-          git apply --check "$P"
-          git apply "$P"
-          git apply --stat "$P"
+          # patch(1) rather than git apply: the patch is authored and committed
+          # from a Windows checkout, and CRLF makes git apply reject it while
+          # patch tolerates both endings.
+          patch -p1 --dry-run --forward --batch <"$P"
+          patch -p1 --forward --batch <"$P"
           # Fail the build if either hunk silently did not land.
-          grep -q 'blank_mode == FB_BLANK_NORMAL' drivers/video/fbdev/exynos/decon/decon_core.c
-          grep -q 'Always suspend the panel' drivers/video/fbdev/exynos/dsim/dsim_drv.c
-          echo "panel patch applied"
+          grep -q 'blank_mode == FB_BLANK_NORMAL' \
+            drivers/video/fbdev/exynos/decon_7870/decon_core.c
+          grep -q 'Always suspend the panel' \
+            drivers/video/fbdev/exynos/decon_7870/dsim_drv.c
+          echo "panel patch applied to decon_7870"
 
       - name: Build kernel Image
         run: |
