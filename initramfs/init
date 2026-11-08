@@ -29,6 +29,10 @@ LOGF=""
 # the USB gadget down with it, so keep a plain-text log on userdata instead.
 log() {
     echo "$*"
+    # Always keep a copy in RAM: userdata may be mounted read-only (Samsung's
+    # FAT driver forces that after an unclean shutdown), and the progress log is
+    # the only record of a boot that dies before userspace.
+    echo "[$(cut -d' ' -f1 /proc/uptime)s] $*" >> /tmp/boot.log 2>/dev/null
     [ -n "$LOGF" ] && echo "[$(cut -d' ' -f1 /proc/uptime)s] $*" >> "$LOGF" 2>/dev/null
     return 0
 }
@@ -212,7 +216,7 @@ loop_try() {
 }
 
 find_rootfs() {
-    echo "[1/4] cmdline root="
+    echo "[1/5] cmdline root="
     if [ -n "$WANT_ROOT" ]; then
         if try_root_dev "$WANT_ROOT" && accept_root; then
             ROOT_HOW="cmdline $WANT_ROOT"; return 0
@@ -221,7 +225,21 @@ find_rootfs() {
         echo "[..]   none given"
     fi
 
-    echo "[2/4] microSD"
+    # The distro normally lives here: a real ext4 partition, mounted rw, no loop
+    # device and no dependency on userdata. An Android system image also lives
+    # here, but accept_root rejects it (no /sbin/init and no /etc/os-release).
+    echo "[2/5] SYSTEM partition"
+    for d in /dev/block/bootdevice/by-name/SYSTEM /dev/block/mmcblk0p19; do
+        if [ -b "$d" ]; then
+            echo "[..]   trying $d"
+            if try_root_dev "$d" && accept_root; then
+                ROOT_HOW="$d (SYSTEM partition)"; return 0
+            fi
+        fi
+    done
+    echo "[..]   no distro there"
+
+    echo "[3/5] microSD"
     for d in /dev/mmcblk1p1 /dev/mmcblk1p2; do
         if [ -b "$d" ]; then
             echo "[..]   trying $d"
@@ -232,7 +250,7 @@ find_rootfs() {
     done
     echo "[..]   no usable card"
 
-    echo "[3/4] rootfs.img on userdata"
+    echo "[4/5] rootfs.img on userdata"
     if mount_data; then
         # Explicit paths first, then globs: /sdcard is /data/media on some
         # TWRP builds and /data/media/0 on others, so do not assume a depth.
@@ -257,7 +275,7 @@ find_rootfs() {
         echo "[..]   could not mount userdata"
     fi
 
-    echo "[4/4] embedded Alpine (/distro -> RAM)"
+    echo "[5/5] embedded Alpine (/distro -> RAM)"
     if [ -d /distro ]; then
         if mount -t tmpfs -o size=400M,mode=0755 tmpfs "$NEWROOT" 2>/dev/null; then
             echo "[..]   copying rootfs into tmpfs"
@@ -287,6 +305,9 @@ switch_to_root() {
     done
     log "[init] switching to $ROOT_HOW"
     log "[init] distro init=$(ls -l "$NEWROOT/sbin/init" 2>/dev/null | tr -s ' ') openrc=$( [ -x "$NEWROOT/sbin/openrc" ] && echo present || echo MISSING )"
+    mkdir -p "$NEWROOT/var/log" 2>/dev/null
+    cp /tmp/boot.log "$NEWROOT/var/log/boot.log" 2>/dev/null && \
+        log "[log] this log is now /var/log/boot.log in the new root"
     if [ -n "$LOGF" ]; then
         echo "--- kernel log up to switch_root ---" >> "$LOGF" 2>/dev/null
         dmesg >> "$LOGF" 2>/dev/null

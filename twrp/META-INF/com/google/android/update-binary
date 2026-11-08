@@ -1,16 +1,22 @@
 #!/sbin/sh
 # TWRP installer for the SM-T585 (gtaxllte) Linux port.
 #
-# Writes the kernel to BOOT and the Alpine/XFCE image to userdata, in one
-# flash. Everything is streamed, so the ~600 MB payload never needs temporary
-# space beyond the target file itself.
+# Writes the kernel to BOOT and the Alpine/XFCE image straight to the SYSTEM
+# partition, in one flash:
 #
-#   boot.img      -> /dev/block/bootdevice/by-name/BOOT  (mmcblk0p9, 32 MiB)
-#   rootfs.img.gz -> <userdata>/media/rootfs.img         (loop-mounted by the
-#                    initramfs loader on the next boot)
+#   boot.img      -> /dev/block/bootdevice/by-name/BOOT   (mmcblk0p9, 32 MiB)
+#   rootfs.img.gz -> /dev/block/bootdevice/by-name/SYSTEM (mmcblk0p19)
 #
-# RECOVERY (TWRP itself) is never touched, so a bad flash is always recoverable
-# with Power + VolDown + Home.
+# The distro does NOT live in a loop file on userdata any more. This tablet's
+# userdata is FAT, and Samsung's FAT driver forces it read-only the moment it
+# sees the damage left by a hard power-off ("Filesystem has been set
+# read-only"). A loop file on a read-only filesystem makes the whole root
+# read-only, which silently stops the desktop from starting. A native ext4
+# partition cannot fail that way.
+#
+# Android's system image on that partition is replaced. It cannot boot anyway:
+# BOOT already holds this Linux kernel. RECOVERY (TWRP) is never touched, so a
+# bad flash is always recoverable with Power + VolDown + Home.
 
 set -u
 
@@ -64,32 +70,23 @@ PHASE=manifest
 [ -n "$BOOT_MD5" ] && [ -n "$BOOT_BYTES" ] || fail "manifest is incomplete"
 [ -n "$ROOTFS_MD5" ] && [ -n "$ROOTFS_SB_MD5" ] || fail "manifest is incomplete"
 
-BOOT_DEV=""
-for d in /dev/block/bootdevice/by-name/BOOT /dev/block/mmcblk0p9; do
-    if [ -e "$d" ]; then BOOT_DEV="$d"; break; fi
-done
-[ -n "$BOOT_DEV" ] || fail "no BOOT partition found"
-
-# ------------------------------------------------------------------ mount data
-# The rootfs lives on the USERDATA partition (vfat here), which the loader
-# mounts at boot; TWRP may not have mounted it yet.
-DATA_MNT=/mnt/gtaxl-data
-if [ ! -d /data/media ]; then
-    mkdir -p "$DATA_MNT"
-    for fs in vfat ext4; do
-        mount -t "$fs" /dev/block/bootdevice/by-name/USERDATA "$DATA_MNT" 2>/dev/null && break
+bootdev() {
+    for d in "$@"; do
+        if [ -e "$d" ]; then echo "$d"; return 0; fi
     done
+    return 1
+}
+
+BOOT_DEV=$(bootdev /dev/block/bootdevice/by-name/BOOT /dev/block/mmcblk0p9) || fail "no BOOT partition"
+ROOT_DEV=$(bootdev /dev/block/bootdevice/by-name/SYSTEM /dev/block/mmcblk0p19) || fail "no SYSTEM partition"
+
+PART_BYTES=$(blockdev --getsize64 "$ROOT_DEV" 2>/dev/null)
+[ -n "$PART_BYTES" ] || PART_BYTES=0
+if [ "$PART_BYTES" -lt "$ROOTFS_BYTES" ]; then
+    fail "SYSTEM is $PART_BYTES bytes, the image needs $ROOTFS_BYTES"
 fi
-if [ -d /data/media ]; then
-    MEDIA=/data/media
-elif [ -d "$DATA_MNT/media" ]; then
-    MEDIA="$DATA_MNT/media"
-elif [ -d "$DATA_MNT" ] && mountpoint -q "$DATA_MNT" 2>/dev/null; then
-    MEDIA="$DATA_MNT"
-else
-    fail "cannot mount USERDATA"
-fi
-ui_print "- userdata: $MEDIA"
+ui_print "- kernel -> $BOOT_DEV"
+ui_print "- rootfs -> $ROOT_DEV ($PART_BYTES bytes)"
 
 # ------------------------------------------------------------------ kernel
 ui_print "- extracting boot.img"
@@ -100,7 +97,7 @@ GOT_SIZE=$(wc -c < "$WORK/boot.img" | tr -d ' \r\n')
 [ "$GOT_SIZE" = "$BOOT_BYTES" ] || fail "boot.img size mismatch ($GOT_SIZE)"
 
 PHASE=kernel
-ui_print "- writing kernel to $BOOT_DEV"
+ui_print "- writing kernel"
 dd if="$WORK/boot.img" of="$BOOT_DEV" bs=1048576 2>/dev/null || fail "dd to BOOT failed"
 sync
 ui_print "  kernel installed: $GOT_SIZE bytes, md5 $GOT_MD5"
@@ -113,19 +110,18 @@ GOT_MD5=$(md5sum "$WORK/rootfs.img.gz" | cut -d' ' -f1)
 [ "$GOT_MD5" = "$ROOTFS_MD5" ] || fail "rootfs.img.gz md5 mismatch ($GOT_MD5)"
 ui_print "  payload verified (md5 $GOT_MD5)"
 
-ui_print "- expanding to $MEDIA/rootfs.img"
-rm -f "$MEDIA/rootfs.img"
-gzip -dc "$WORK/rootfs.img.gz" > "$MEDIA/rootfs.img" || fail "gzip failed (corrupt payload or disk full)"
+PHASE=rootfs-write
+ui_print "- writing rootfs to $ROOT_DEV"
+gzip -dc "$WORK/rootfs.img.gz" | dd of="$ROOT_DEV" bs=1048576 2>/dev/null || \
+    fail "writing the image failed"
 sync
-GOT_SIZE=$(wc -c < "$MEDIA/rootfs.img" | tr -d ' \r\n')
-[ "$GOT_SIZE" = "$ROOTFS_BYTES" ] || fail "rootfs.img is $GOT_SIZE bytes, expected $ROOTFS_BYTES"
 
 # The first 4 KiB must be byte-identical to the payload's superblock. Compared
 # by md5 because this recovery's od cannot print hex at all.
 PHASE=verify
-GOT_SB=$(dd if="$MEDIA/rootfs.img" bs=4096 count=1 2>/dev/null | md5sum | cut -d' ' -f1)
-[ "$GOT_SB" = "$ROOTFS_SB_MD5" ] || fail "rootfs.img superblock does not match the payload (got $GOT_SB)"
-ui_print "  rootfs installed: $GOT_SIZE bytes, ext4 superblock OK"
+GOT_SB=$(dd if="$ROOT_DEV" bs=4096 count=1 2>/dev/null | md5sum | cut -d' ' -f1)
+[ "$GOT_SB" = "$ROOTFS_SB_MD5" ] || fail "rootfs superblock does not match the payload (got $GOT_SB)"
+ui_print "  rootfs installed: $ROOTFS_BYTES bytes, ext4 superblock OK"
 
 rm -rf "$WORK"
 sync
