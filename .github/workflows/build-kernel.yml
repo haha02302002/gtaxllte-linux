@@ -168,12 +168,24 @@ jobs:
           sudo install -m 755 scripts/start-gui.sh /tmp/rootfs/usr/local/bin/start-gui
           # This repo is checked out on Windows with core.autocrlf, so a script can
           # land here with CRLF endings: the kernel then sees a shebang of
-          # "#!/bin/sh", which is not a valid interpreter and the script fails to
+          # "#!/bin/sh
+", which is not a valid interpreter and the script fails to
           # exec with "exec format error". Normalise every installed script.
-          sudo sed -i 's/$//' /tmp/rootfs/usr/local/bin/start-gui \
+          sudo sed -i 's/
+$//' /tmp/rootfs/usr/local/bin/start-gui \
               /tmp/rootfs/usr/local/bin/driver-check \
               /tmp/rootfs/usr/local/bin/usb-console-watchdog
           sudo chmod 755 /tmp/rootfs/usr/local/bin/start-gui \
+          sudo install -m 755 scripts/tablet-ui.sh /tmp/rootfs/usr/local/bin/tablet-ui
+          sudo mkdir -p /tmp/rootfs/etc/xdg/autostart
+          printf '[Desktop Entry]
+Type=Application
+Name=Tablet tuning
+Exec=/usr/local/bin/tablet-ui
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+' | sudo tee /tmp/rootfs/etc/xdg/autostart/tablet-ui.desktop >/dev/null
               /tmp/rootfs/usr/local/bin/driver-check \
               /tmp/rootfs/usr/local/bin/usb-console-watchdog
           sudo install -m 755 scripts/usb-console-watchdog.sh /tmp/rootfs/usr/local/bin/usb-console-watchdog

@@ -121,8 +121,18 @@ usb_serial_setup() {
     return 0
 }
 
+vbus_online() {
+    for f in /sys/class/power_supply/*/online; do
+        [ -e "$f" ] || continue
+        [ "$(cat "$f" 2>/dev/null)" = "1" ] && return 0
+    done
+    return 1
+}
+
 echo "[init] setting up USB serial gadget"
-if usb_serial_setup; then
+if ! vbus_online; then
+    echo "[init] no VBUS, gadget bind deferred to the watchdog"
+elif usb_serial_setup; then
     i=0
     while [ $i -lt 20 ]; do
         [ -c /dev/ttyGS0 ] && break

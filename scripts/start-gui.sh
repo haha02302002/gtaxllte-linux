@@ -127,6 +127,16 @@ Section "Screen"
     EndSubSection
 EndSection
 Section "InputClass"
+    Identifier "touch-tuning"
+    MatchIsTouchscreen "on"
+    Driver "libinput"
+    Option "Tapping" "on"
+    Option "TappingDrag" "on"
+    Option "DisableWhileTyping" "false"
+    Option "ScrollMethod" "twofinger"
+    Option "AccelProfile" "flat"
+EndSection
+Section "InputClass"
     Identifier "ignore-sensors"
     MatchProduct "accelerometer_sensor|light_sensor|grip_sensor_wifi|hall|meta_event"
     Option "Ignore" "true"
