@@ -20,6 +20,18 @@ else
 fi
 i=0
 while [ $i -lt 10 ]; do [ -e /sys/class/net/wlan0 ] && break; i=$((i + 1)); sleep 3; done
+
+# Join the saved network at boot, then correct the clock. Without NTP the
+# SoC starts in 2016, so every TLS connection (apk, https) fails cert checks.
+if [ -e /sys/class/net/wlan0 ] && [ -e /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+    killall wpa_supplicant 2>/dev/null
+    wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf >/dev/null 2>&1
+    sleep 8
+    udhcpc -i wlan0 -b -q >/dev/null 2>&1
+    echo "wlan0: $(ifconfig wlan0 2>/dev/null | grep -o "inet addr:[0-9.]*")"
+    ntpd -q -p pool.ntp.org >/dev/null 2>&1 || true
+    echo "clock: $(date)"
+fi
 if [ -e /sys/class/net/wlan0 ]; then
     echo "wlan0: present after ~$((i * 3))s"
     ifconfig wlan0 up 2>/dev/null || ip link set wlan0 up 2>/dev/null
