@@ -32,6 +32,12 @@ dmesg 2>/dev/null | grep -i -e wlan -e cnss -e firmware | tail -8
 # The QCA6174 BT side is on a UART and needs a userspace attach (bluez
 # deprecated hciattach); without it no hci0 exists even though the kernel
 # stack (RFCOMM/BNEP/HIDP) is initialised.
+# hciattach looks for the QCA blobs under /etc/firmware; the image keeps them
+# in /lib/firmware, so link them into place before attaching.
+mkdir -p /etc/firmware
+for f in nvm_tlv_tf_1.1.bin rampatch_tlv_tf_1.1.tlv; do
+    [ -e "/lib/firmware/$f" ] && ln -sf "/lib/firmware/$f" "/etc/firmware/$f"
+done
 if [ ! -e /sys/class/bluetooth/hci0 ] && command -v hciattach >/dev/null 2>&1; then
     for t in /dev/ttySAC1 /dev/ttySAC2; do
         [ -e "$t" ] || continue
