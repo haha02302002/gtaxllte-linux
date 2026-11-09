@@ -151,10 +151,16 @@ accept_root() {
 
 try_root_dev() {
     for fs in ext4 f2fs vfat; do
-        if mount -t "$fs" -o rw "$1" "$NEWROOT" 2>/dev/null; then
-            echo "[..]   mounted $1 as $fs"
-            return 0
-        fi
+        n=0
+        while [ "$n" -lt 5 ]; do
+            if ERR=$(mount -t "$fs" -o rw "$1" "$NEWROOT" 2>&1); then
+                echo "[..]   mounted $1 as $fs"
+                return 0
+            fi
+            n=$((n + 1))
+            sleep 0.3 2>/dev/null || sleep 1
+        done
+        log "[..]   $1 as $fs failed after ${n} tries: $ERR"
     done
     return 1
 }
@@ -229,7 +235,16 @@ find_rootfs() {
     # device and no dependency on userdata. An Android system image also lives
     # here, but accept_root rejects it (no /sbin/init and no /etc/os-release).
     echo "[2/5] SYSTEM partition"
-    for d in /dev/block/bootdevice/by-name/SYSTEM /dev/block/mmcblk0p19; do
+    # devtmpfs populates the mmc partition nodes while this script is already
+    # running, so the first probe can find /dev/mmcblk0p19 missing even though
+    # the partition is right there (userdata, probed a moment later, mounts).
+    w=0
+    while [ ! -b /dev/mmcblk0p19 ] && [ "$w" -lt 25 ]; do
+        sleep 0.2 2>/dev/null || sleep 1
+        w=$((w + 1))
+    done
+    echo "[..]   SYSTEM node wait: ${w}x0.2s"
+    for d in /dev/block/bootdevice/by-name/SYSTEM /dev/mmcblk0p19 /dev/mmcblk0p1[6-9] /dev/mmcblk0p2[0-2]; do
         if [ -b "$d" ]; then
             echo "[..]   trying $d"
             if try_root_dev "$d" && accept_root; then
@@ -274,6 +289,22 @@ find_rootfs() {
     else
         echo "[..]   could not mount userdata"
     fi
+
+    # Second chance for the SYSTEM partition. The first probe can lose a race
+    # with partition scanning and fail with EBUSY even though the very same node
+    # mounts fine a moment later (userdata is mounted just above), so retry now
+    # that the block layer is definitely settled.
+    log "[2b/5] SYSTEM partition (retry)"
+    for n in 1 2 3; do
+        for d in /dev/block/bootdevice/by-name/SYSTEM /dev/mmcblk0p19 /dev/mmcblk0p1[6-9] /dev/mmcblk0p2[0-2]; do
+            [ -b "$d" ] || continue
+            if try_root_dev "$d" && accept_root; then
+                ROOT_HOW="$d (SYSTEM partition, retry $n)"; return 0
+            fi
+        done
+        sleep 1
+    done
+    log "[..]   SYSTEM still not usable"
 
     echo "[5/5] embedded Alpine (/distro -> RAM)"
     if [ -d /distro ]; then
