@@ -149,6 +149,19 @@ jobs:
           printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
           sudo mkdir -p /tmp/rootfs/run /tmp/rootfs/tmp /tmp/rootfs/dev/pts /tmp/rootfs/etc/X11
           sudo mkdir -p /tmp/rootfs/lib/firmware
+          # Vendor firmware the built-in drivers request at probe time. Without it
+          # cnss reports a firmware load failure and no wlan0 ever appears, and
+          # s5p-mfc cannot bring up the video codec (mfc_fw.bin). Paths cover both
+          # the CNSS convention (/etc/firmware) and the generic one (/lib/firmware).
+          sudo mkdir -p /tmp/rootfs/lib/firmware/wlan/qca_cld /tmp/rootfs/lib/firmware/wlan/prima /tmp/rootfs/etc/firmware/wlan
+          sudo cp -a firmware/. /tmp/rootfs/lib/firmware/
+          sudo cp -a firmware/. /tmp/rootfs/etc/firmware/
+          sudo cp -f firmware/wlan/qcom_cfg.ini /tmp/rootfs/lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
+          sudo cp -f firmware/wlan/qcom_cfg.ini /tmp/rootfs/lib/firmware/wlan/prima/WCNSS_qcom_cfg.ini
+          sudo cp -f firmware/wlan/WCNSS_cfg.dat /tmp/rootfs/lib/firmware/wlan/qca_cld/WCNSS_cfg.dat
+          for f in /tmp/rootfs/lib/firmware/bdwlan30.bin /tmp/rootfs/lib/firmware/qwlan30.bin /tmp/rootfs/lib/firmware/otp30.bin /tmp/rootfs/lib/firmware/utf30.bin /tmp/rootfs/lib/firmware/mfc_fw.bin /tmp/rootfs/lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini; do
+              [ -s "$f" ] && echo "ok $f" || echo "MISSING $f"
+          done
 
           # Start X on the framebuffer with the touchscreen as the pointer. The event
           # node number moves between boots, so it is resolved by device name.
