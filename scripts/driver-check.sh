@@ -29,7 +29,7 @@ if [ -e /sys/class/net/wlan0 ] && [ -e /etc/wpa_supplicant/wpa_supplicant.conf ]
     sleep 8
     udhcpc -i wlan0 -b -q >/dev/null 2>&1
     echo "wlan0: $(ifconfig wlan0 2>/dev/null | grep -o "inet addr:[0-9.]*")"
-    ntpd -q -p pool.ntp.org >/dev/null 2>&1 || true
+    timeout 20 ntpd -q -p pool.ntp.org >/dev/null 2>&1 || echo "clock: ntp sync skipped"
     echo "clock: $(date)"
 fi
 if [ -e /sys/class/net/wlan0 ]; then
