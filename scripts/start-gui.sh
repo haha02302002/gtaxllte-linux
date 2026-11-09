@@ -215,10 +215,18 @@ fi
 
 grep -E '\(EE\)|Using input driver|libinput|no screens' /var/log/Xorg.0.log 2>/dev/null | tail -12
 
-# on-screen keyboard for a tablet with no physical keyboard
-for kb in matchbox-keyboard xvkbd; do
-    command -v "$kb" >/dev/null 2>&1 && { "$kb" >/dev/null 2>&1 & break; }
-done
+# On-screen keyboard for a tablet with no physical keyboard. The panel is
+# 1200x1920, so matchbox-keyboard needs a large key size or every key is a
+# few pixels tall; -s sets the font size the key geometry is derived from.
+if command -v matchbox-keyboard >/dev/null 2>&1; then
+    matchbox-keyboard -s 50 >/dev/null 2>&1 &
+    echo "osk: matchbox-keyboard -s 50"
+elif command -v xvkbd >/dev/null 2>&1; then
+    xvkbd -geometry 1160x420+20+1480 >/dev/null 2>&1 &
+    echo "osk: xvkbd"
+else
+    echo "osk: none installed"
+fi
 
 # -------------------------------------------------------------------- session
 SESSION=""
