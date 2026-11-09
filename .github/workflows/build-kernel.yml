@@ -143,7 +143,7 @@ jobs:
 
           # image fixups: unlocked root, busybox inittab, hostname, resolv, fstab
           sudo sed -i 's|^root:[^:]*:|root::|' /tmp/rootfs/etc/shadow
-          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -n -l /bin/sh -L ttyGS0 115200 vt100\ntty1::respawn:/usr/local/bin/start-gui\n::sysinit:/usr/local/bin/driver-check\n::respawn:/usr/local/bin/usb-console-watchdog\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
+          printf '::sysinit:/bin/mount -a\n::sysinit:/bin/hostname -F /etc/hostname\nttyGS0::respawn:/sbin/getty -n -l /bin/sh -L ttyGS0 115200 vt100\ntty1::respawn:/bin/sh /usr/local/bin/start-gui\n::sysinit:/usr/local/bin/driver-check\n::respawn:/usr/local/bin/usb-console-watchdog\n::ctrlaltdel:/sbin/reboot\n::shutdown:/bin/umount -a -r\n' | sudo tee /tmp/rootfs/etc/inittab >/dev/null
           echo gtaxllte | sudo tee /tmp/rootfs/etc/hostname >/dev/null
           printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /tmp/rootfs/etc/resolv.conf >/dev/null
           printf 'proc /proc proc defaults 0 0\nsysfs /sys sysfs defaults 0 0\ndevpts /dev/pts devpts defaults 0 0\ntmpfs /run tmpfs defaults 0 0\ntmpfs /tmp tmpfs defaults 0 0\n' | sudo tee /tmp/rootfs/etc/fstab >/dev/null
@@ -166,6 +166,16 @@ jobs:
           # Start X on the framebuffer with the touchscreen as the pointer. The event
           # node number moves between boots, so it is resolved by device name.
           sudo install -m 755 scripts/start-gui.sh /tmp/rootfs/usr/local/bin/start-gui
+          # This repo is checked out on Windows with core.autocrlf, so a script can
+          # land here with CRLF endings: the kernel then sees a shebang of
+          # "#!/bin/sh", which is not a valid interpreter and the script fails to
+          # exec with "exec format error". Normalise every installed script.
+          sudo sed -i 's/$//' /tmp/rootfs/usr/local/bin/start-gui \
+              /tmp/rootfs/usr/local/bin/driver-check \
+              /tmp/rootfs/usr/local/bin/usb-console-watchdog
+          sudo chmod 755 /tmp/rootfs/usr/local/bin/start-gui \
+              /tmp/rootfs/usr/local/bin/driver-check \
+              /tmp/rootfs/usr/local/bin/usb-console-watchdog
           sudo install -m 755 scripts/usb-console-watchdog.sh /tmp/rootfs/usr/local/bin/usb-console-watchdog
           sudo install -m 755 scripts/driver-check.sh /tmp/rootfs/usr/local/bin/driver-check
 
