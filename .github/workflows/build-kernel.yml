@@ -129,7 +129,7 @@ jobs:
                 matchbox-keyboard dbus polkit \
                 mesa mesa-dri-gallium mesa-utils \
                 alsa-utils alsa-ucm-conf \
-                wpa_supplicant iw wireless-tools bluez
+                wpa_supplicant iw wireless-tools bluez bluez-deprecated
             ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/bin/twm
             ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
             ls /rootfs/usr/lib/xorg/modules/input/libinput_drv.so /rootfs/sbin/udevd

@@ -29,7 +29,27 @@ else
     echo "wlan0: absent"
 fi
 dmesg 2>/dev/null | grep -i -e wlan -e cnss -e firmware | tail -8
-if [ -e /sys/class/bluetooth/hci0 ]; then echo "hci0: present"; hciconfig hci0 up 2>/dev/null; hciconfig hci0 2>/dev/null | head -4; else echo "hci0: absent"; fi
+# The QCA6174 BT side is on a UART and needs a userspace attach (bluez
+# deprecated hciattach); without it no hci0 exists even though the kernel
+# stack (RFCOMM/BNEP/HIDP) is initialised.
+if [ ! -e /sys/class/bluetooth/hci0 ] && command -v hciattach >/dev/null 2>&1; then
+    for t in /dev/ttySAC1 /dev/ttySAC2; do
+        [ -e "$t" ] || continue
+        echo "bt: attaching $t"
+        timeout 25 hciattach "$t" qca 3000000 flow -t 20 >/tmp/btattach.log 2>&1 &
+        sleep 8
+        if [ -e /sys/class/bluetooth/hci0 ]; then echo "bt: hci0 up via $t"; break; fi
+        echo "bt: no hci0 via $t ($(tail -c 120 /tmp/btattach.log 2>/dev/null | tr "
+" " "))"
+    done
+fi
+if [ -e /sys/class/bluetooth/hci0 ]; then
+    echo "hci0: present"
+    hciconfig hci0 up 2>/dev/null
+    hciconfig hci0 2>/dev/null | head -4
+else
+    echo "hci0: absent"
+fi
 if dmesg 2>/dev/null | grep -q "mfc_fw.bin failed"; then echo "mfc: firmware load STILL failing"; else echo "mfc: no load error"; fi
 echo "sound: $(sed -n 1,2p /proc/asound/cards 2>/dev/null | tr '\n' ' ')"
 echo "mali: $(cat /sys/class/misc/mali0/device/power/runtime_status 2>/dev/null)"
