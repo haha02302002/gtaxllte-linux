@@ -8,6 +8,16 @@ for f in bdwlan30.bin qwlan30.bin otp30.bin utf30.bin mfc_fw.bin; do
     if [ -s "/lib/firmware/$f" ]; then echo "fw $f: $(stat -c%s "/lib/firmware/$f" 2>/dev/null) bytes"; else echo "fw $f: MISSING"; fi
 done
 [ -s /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini ] && echo "fw wlan cfg: present" || echo "fw wlan cfg: MISSING"
+
+# qcacld is built in, so hdd_module_init() returns at once and the real
+# init waits for fwpath_changed_handler; Android init fires it by writing
+# the fwpath module parameter. Without this no SDIO driver registers.
+if [ -e /sys/module/wlan/parameters/fwpath ]; then
+    echo sta > /sys/module/wlan/parameters/fwpath 2>/dev/null
+    echo "wlan: fwpath=$(cat /sys/module/wlan/parameters/fwpath 2>/dev/null)"
+else
+    echo "wlan: fwpath parameter MISSING"
+fi
 i=0
 while [ $i -lt 10 ]; do [ -e /sys/class/net/wlan0 ] && break; i=$((i + 1)); sleep 3; done
 if [ -e /sys/class/net/wlan0 ]; then
