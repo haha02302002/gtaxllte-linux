@@ -110,7 +110,6 @@ EndSection
 Section "ServerLayout"
     Identifier "layout"
     Screen "screen"
-    InputDevice "touch"
 EndSection
 Section "Device"
     Identifier "fb"
@@ -126,11 +125,6 @@ Section "Screen"
         Depth 24
         Modes "1200x1920"
     EndSubSection
-EndSection
-Section "InputDevice"
-    Identifier "touch"
-    Driver "libinput"
-    Option "Device" "$EV"
 EndSection
 Section "InputClass"
     Identifier "ignore-sensors"
@@ -149,7 +143,6 @@ EndSection
 Section "ServerLayout"
     Identifier "layout"
     Screen "screen"
-    InputDevice "touch"
 EndSection
 Section "Device"
     Identifier "fb"
@@ -165,12 +158,6 @@ Section "Screen"
         Depth 24
         Modes "1200x1920"
     EndSubSection
-EndSection
-Section "InputDevice"
-    Identifier "touch"
-    Driver "evdev"
-    Option "Device" "$EV"
-    Option "IgnoreRelativeAxes" "true"
 EndSection
 CONF
 fi
