@@ -18,6 +18,37 @@ log() { echo "$(date 2>/dev/null) $*" >> "$LOG"; }
 find_udc() { for d in /sys/class/udc/*; do [ -e "$d/state" ] || continue; basename "$d"; return 0; done; return 1; }
 find_gadget() { for g in /sys/kernel/config/usb_gadget/*; do [ -e "$g/UDC" ] || continue; echo "$g"; return 0; done; return 1; }
 rx_bytes() { cat /sys/class/tty/ttyGS0/statistics/rx_bytes 2>/dev/null; }
+vbus_online() {
+    for f in /sys/class/power_supply/*/online; do
+        [ -e "$f" ] || continue
+        [ "$(cat "$f" 2>/dev/null)" = "1" ] && return 0
+    done
+    return 1
+}
+
+# initramfs init defers the gadget when it boots without VBUS, so when power
+# appears later this has to create and bind it, otherwise there is no console
+# for the rest of the session.
+gadget_up() {
+    G=/sys/kernel/config/usb_gadget/g1
+    UDC=$(find_udc) || return 1
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    [ -d /sys/kernel/config/usb_gadget ] || return 1
+    if [ ! -d "$G" ]; then
+        mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" || return 1
+        echo 0x1d6b > "$G/idVendor";  echo 0x0104 > "$G/idProduct"
+        echo 0x0100 > "$G/bcdDevice"; echo 0x0200 > "$G/bcdUSB"
+        echo gtaxllte-linux > "$G/strings/0x409/manufacturer"
+        echo "SM-T585 USB serial console" > "$G/strings/0x409/product"
+        echo 0001 > "$G/strings/0x409/serialnumber"
+        echo ACM > "$G/configs/c.1/strings/0x409/configuration"
+        echo 100 > "$G/configs/c.1/MaxPower"
+        mkdir -p "$G/functions/acm.gs0" 2>/dev/null
+        ln -sf "$G/functions/acm.gs0" "$G/configs/c.1/acm.gs0" 2>/dev/null
+    fi
+    echo "$UDC" > "$G/UDC" 2>/dev/null || return 1
+    return 0
+}
 rebind() {
     log "rebinding $1 via $2 (reason: $3)"
     echo "" > "$2/UDC" 2>/dev/null
@@ -34,7 +65,17 @@ prev_rx=$(rx_bytes)
 while :; do
     sleep "$delay"
     UDC=$(find_udc); G=$(find_gadget)
-    if [ -z "$UDC" ] || [ -z "$G" ]; then log "no udc/gadget"; continue; fi
+    if [ -z "$G" ] || [ -z "$(cat "$G/UDC" 2>/dev/null)" ]; then
+        if vbus_online; then
+            if gadget_up; then log "gadget bound after power appeared"; delay=60; continue; fi
+            log "gadget bind failed"
+        else
+            log "gadget unbound, no VBUS"
+        fi
+        delay=120
+        continue
+    fi
+    if [ -z "$UDC" ]; then log "no udc"; delay=120; continue; fi
     if [ -e /tmp/usb-rebind ]; then rm -f /tmp/usb-rebind; rebind "$UDC" "$G" forced; bad=0; idle=0; delay=60; prev_rx=$(rx_bytes); continue; fi
 
     rx=$(rx_bytes)
