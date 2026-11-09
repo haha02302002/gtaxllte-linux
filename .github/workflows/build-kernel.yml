@@ -126,12 +126,17 @@ jobs:
                 twm xterm font-misc-misc font-dejavu font-noto \
                 xfce4 xfce4-terminal xfce4-screenshooter xfce4-panel \
                 adwaita-icon-theme hicolor-icon-theme shared-mime-info \
-                matchbox-keyboard dbus polkit \n                mesa mesa-dri-gallium mesa-utils \n                alsa-utils alsa-ucm-conf \n                wpa_supplicant iw wireless-tools bluez
+                matchbox-keyboard dbus polkit \
+                mesa mesa-dri-gallium mesa-utils \
+                alsa-utils alsa-ucm-conf \
+                wpa_supplicant iw wireless-tools bluez
             ls /rootfs/usr/bin/startxfce4 /rootfs/usr/bin/Xorg /rootfs/usr/bin/twm
             ls /rootfs/usr/lib/xorg/modules/drivers/fbdev_drv.so
             ls /rootfs/usr/lib/xorg/modules/input/libinput_drv.so /rootfs/sbin/udevd
             ls -d /rootfs/usr/share/icons/Adwaita
-            for f in /rootfs/usr/bin/glxinfo /rootfs/usr/bin/aplay \n                     /rootfs/usr/sbin/wpa_supplicant \n                     /rootfs/usr/lib/bluetooth/bluetoothd; do
+            for f in /rootfs/usr/bin/glxinfo /rootfs/usr/bin/aplay \
+                     /rootfs/usr/sbin/wpa_supplicant \
+                     /rootfs/usr/lib/bluetooth/bluetoothd; do
                 [ -e "$f" ] && echo "ok $f" || echo "MISSING $f"
             done
           '
