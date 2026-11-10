@@ -41,7 +41,20 @@ put xfwm4 /general/snap_to_border true
 put xfce4-keyboard-shortcuts /commands/custom/XF86AudioRaiseVolume "amixer -q sset Master 5%+ unmute"
 put xfce4-keyboard-shortcuts /commands/custom/XF86AudioLowerVolume "amixer -q sset Master 5%- unmute"
 put xfce4-keyboard-shortcuts /commands/custom/XF86AudioMute "amixer -q sset Master toggle"
-put xfce4-keyboard-shortcuts /commands/custom/XF86PowerOff "xfce4-session-logout --fast"
+# The power key used to run "xfce4-session-logout --fast", which tears the
+# session down instantly; that is indistinguishable from a freeze and leaves X
+# half dead. Ask first, so a stray press can be cancelled.
+put xfce4-keyboard-shortcuts /commands/custom/XF86PowerOff "xfce4-session-logout"
+
+# ------------------------------------------------------------ power manager
+# Suspend and DPMS do not work on this kernel: blanking the panel or trying to
+# suspend wedges the display and the tablet is dead until it is power cycled.
+# A tablet that lives on a desk must simply stay awake.
+for p in dpms-enabled blank-on-ac blank-on-battery dpms-on-ac-sleep          dpms-on-ac-off dpms-on-battery-sleep dpms-on-battery-off          inactivity-on-ac inactivity-on-battery; do
+    put xfce4-power-manager "/xfce4-power-manager/$p" false
+    put xfce4-power-manager "/xfce4-power-manager/$p" 0 int
+done
+command -v xset >/dev/null 2>&1 && { xset s off; xset s noblank; xset -dpms; }
 
 # A tap on the panel's keyboard button toggles the on-screen keyboard.
 put xfce4-keyboard-shortcuts /commands/custom/XF86HomePage "matchbox-keyboard --toggle"

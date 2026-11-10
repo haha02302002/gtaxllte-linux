@@ -249,7 +249,11 @@ find_rootfs() {
     # running, so the first probe can find /dev/mmcblk0p19 missing even though
     # the partition is right there (userdata, probed a moment later, mounts).
     w=0
-    while [ ! -b /dev/mmcblk0p19 ] && [ "$w" -lt 25 ]; do
+    # A cold boot powers the eMMC up from scratch and it can take many seconds
+    # to appear; a warm reboot (for example from TWRP) already has it running,
+    # which is why the short wait only ever failed after a real power cycle.
+    while [ ! -b /dev/mmcblk0p19 ] && [ "$w" -lt 150 ]; do
+        mdev -s 2>/dev/null
         sleep 0.2 2>/dev/null || sleep 1
         w=$((w + 1))
     done
