@@ -167,6 +167,7 @@ jobs:
           # node number moves between boots, so it is resolved by device name.
           sudo install -m 755 scripts/start-gui.sh /tmp/rootfs/usr/local/bin/start-gui
           sudo install -m 755 scripts/tablet-ui.sh /tmp/rootfs/usr/local/bin/tablet-ui
+          sudo install -D -m 644 scripts/keyboard-tablet.xml /tmp/rootfs/usr/share/matchbox-keyboard/keyboard-tablet.xml
           sudo mkdir -p /tmp/rootfs/etc/xdg/autostart
           printf '[Desktop Entry]\nType=Application\nName=Tablet tuning\nExec=/usr/local/bin/tablet-ui\nOnlyShowIn=XFCE;\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n' | sudo tee /tmp/rootfs/etc/xdg/autostart/tablet-ui.desktop >/dev/null
           sudo install -m 755 scripts/usb-console-watchdog.sh /tmp/rootfs/usr/local/bin/usb-console-watchdog
