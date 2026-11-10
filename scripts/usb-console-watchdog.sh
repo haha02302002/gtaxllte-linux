@@ -60,23 +60,36 @@ rebind() {
 sleep 20
 UDC=$(find_udc); G=$(find_gadget)
 log "watchdog start udc=${UDC:-none} gadget=${G:-none} rx=$(rx_bytes)"
-bad=0; idle=0; delay=60
+bad=0; idle=0; delay=15
 prev_rx=$(rx_bytes)
 while :; do
     sleep "$delay"
     UDC=$(find_udc); G=$(find_gadget)
     if [ -z "$G" ] || [ -z "$(cat "$G/UDC" 2>/dev/null)" ]; then
         if vbus_online; then
-            if gadget_up; then log "gadget bound after power appeared"; delay=60; continue; fi
+            if gadget_up; then log "gadget bound after power appeared"; delay=15; continue; fi
             log "gadget bind failed"
         else
             log "gadget unbound, no VBUS"
         fi
-        delay=120
+        delay=10
         continue
     fi
-    if [ -z "$UDC" ]; then log "no udc"; delay=120; continue; fi
-    if [ -e /tmp/usb-rebind ]; then rm -f /tmp/usb-rebind; rebind "$UDC" "$G" forced; bad=0; idle=0; delay=60; prev_rx=$(rx_bytes); continue; fi
+    if [ -z "$UDC" ]; then
+        # The UDC can vanish from /sys/class/udc entirely - it does when X
+        # starts and the USB PHY is re-initialised. A binding left pointing at
+        # a UDC that no longer exists can never come back, so drop it, then
+        # retry quickly: the old two-minute wait meant no console for minutes.
+        if [ -n "$G" ] && [ ! -d "/sys/class/udc/$(cat "$G/UDC" 2>/dev/null)" ]; then
+            echo "" > "$G/UDC" 2>/dev/null
+            log "stale udc binding cleared"
+        fi
+        if vbus_online && gadget_up; then log "udc returned, rebound"; delay=15; continue; fi
+        log "no udc"
+        delay=10
+        continue
+    fi
+    if [ -e /tmp/usb-rebind ]; then rm -f /tmp/usb-rebind; rebind "$UDC" "$G" forced; bad=0; idle=0; delay=15; prev_rx=$(rx_bytes); continue; fi
 
     rx=$(rx_bytes)
     if [ -n "$rx" ] && [ "$rx" != "$prev_rx" ]; then idle=0; else idle=$((idle + 1)); fi
@@ -86,7 +99,7 @@ while :; do
     if [ "$st" = "configured" ]; then
         [ "$bad" -ne 0 ] && log "healthy again"
         bad=0
-        delay=60
+        delay=15
         if [ "$idle" -ge 10 ]; then
             rebind "$UDC" "$G" "idle ${idle}p"
             idle=0
@@ -95,5 +108,5 @@ while :; do
         continue
     fi
     bad=$((bad + 1)); log "state=${st:-unknown} bad=$bad"
-    if [ "$bad" -ge 3 ]; then rebind "$UDC" "$G" "state=$st"; bad=0; idle=0; delay=300; prev_rx=$(rx_bytes); fi
+    if [ "$bad" -ge 3 ]; then rebind "$UDC" "$G" "state=$st"; bad=0; idle=0; delay=15; prev_rx=$(rx_bytes); fi
 done
