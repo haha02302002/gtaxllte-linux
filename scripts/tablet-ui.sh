@@ -50,10 +50,12 @@ put xfce4-keyboard-shortcuts /commands/custom/XF86PowerOff "xfce4-session-logout
 # Suspend and DPMS do not work on this kernel: blanking the panel or trying to
 # suspend wedges the display and the tablet is dead until it is power cycled.
 # A tablet that lives on a desk must simply stay awake.
-for p in dpms-enabled blank-on-ac blank-on-battery dpms-on-ac-sleep          dpms-on-ac-off dpms-on-battery-sleep dpms-on-battery-off          inactivity-on-ac inactivity-on-battery; do
-    put xfce4-power-manager "/xfce4-power-manager/$p" false
-    put xfce4-power-manager "/xfce4-power-manager/$p" 0 int
+put xfce4-power-manager /xfce4-power-manager/dpms-enabled false bool
+for p in blank-on-ac blank-on-battery dpms-on-ac-sleep dpms-on-ac-off          dpms-on-battery-sleep dpms-on-battery-off activity-on-ac          inactivity-on-ac inactivity-on-battery; do
+    put xfce4-power-manager "/xfce4-power-manager/$p" 0 uint
 done
+# xset is not part of this image, so the X screensaver defaults stay; they only
+# blank, they never suspend, and the panel comes back on a tap.
 command -v xset >/dev/null 2>&1 && { xset s off; xset s noblank; xset -dpms; }
 
 # A tap on the panel's keyboard button toggles the on-screen keyboard.
