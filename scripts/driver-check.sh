@@ -74,3 +74,11 @@ echo "mali: $(cat /sys/class/misc/mali0/device/power/runtime_status 2>/dev/null)
 echo "backlight: $(cat /sys/class/backlight/panel/brightness 2>/dev/null)/$(cat /sys/class/backlight/panel/max_brightness 2>/dev/null)"
 echo "battery: $(cat /sys/class/power_supply/battery/capacity 2>/dev/null)%"
 echo "=== done ==="
+
+# Touching the panel while sec_touchscreen is still probing detaches the
+# driver a few seconds into boot. Start the guard now, before X exists,
+# so it is already watching across that whole window.
+if [ -x /usr/local/bin/touch-guard ]; then
+    /usr/local/bin/touch-guard >/dev/null 2>&1 &
+    echo "touch-guard started"
+fi

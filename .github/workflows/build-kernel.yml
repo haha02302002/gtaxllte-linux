@@ -167,12 +167,14 @@ jobs:
           # node number moves between boots, so it is resolved by device name.
           sudo install -m 755 scripts/start-gui.sh /tmp/rootfs/usr/local/bin/start-gui
           sudo install -m 755 scripts/tablet-ui.sh /tmp/rootfs/usr/local/bin/tablet-ui
+          sudo install -m 755 scripts/touch-guard.sh /tmp/rootfs/usr/local/bin/touch-guard
           sudo install -D -m 644 scripts/keyboard-tablet.xml /tmp/rootfs/usr/share/matchbox-keyboard/keyboard-tablet.xml
+          sudo install -m 644 scripts/keyboard-tablet.xml /tmp/rootfs/usr/share/matchbox-keyboard/keyboard.xml
           sudo mkdir -p /tmp/rootfs/etc/xdg/autostart
           printf '[Desktop Entry]\nType=Application\nName=Tablet tuning\nExec=/usr/local/bin/tablet-ui\nOnlyShowIn=XFCE;\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n' | sudo tee /tmp/rootfs/etc/xdg/autostart/tablet-ui.desktop >/dev/null
           sudo install -m 755 scripts/usb-console-watchdog.sh /tmp/rootfs/usr/local/bin/usb-console-watchdog
           sudo install -m 755 scripts/driver-check.sh /tmp/rootfs/usr/local/bin/driver-check
-          sudo sed -i 's/\r$//' /tmp/rootfs/usr/local/bin/start-gui /tmp/rootfs/usr/local/bin/tablet-ui /tmp/rootfs/usr/local/bin/driver-check /tmp/rootfs/usr/local/bin/usb-console-watchdog
+          sudo sed -i 's/\r$//' /tmp/rootfs/usr/local/bin/start-gui /tmp/rootfs/usr/local/bin/tablet-ui /tmp/rootfs/usr/local/bin/driver-check /tmp/rootfs/usr/local/bin/usb-console-watchdog /tmp/rootfs/usr/local/bin/touch-guard
 
           # autologin into XFCE when X is started from tty1 as root
           sudo tee /tmp/rootfs/root/.xinitrc >/dev/null <<'XINIT'

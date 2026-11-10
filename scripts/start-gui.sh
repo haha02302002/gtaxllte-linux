@@ -235,8 +235,13 @@ if command -v matchbox-keyboard >/dev/null 2>&1; then
     # reset cannot leave an empty file behind.
     LAYOUT=/usr/share/matchbox-keyboard/keyboard-tablet.xml
     if [ -f "$LAYOUT" ]; then
-        mkdir -p /root/.matchbox
-        cat "$LAYOUT" > /root/.matchbox/keyboard.xml 2>/dev/null && sync
+        # Both places: ~/.matchbox is what matchbox-keyboard reads, and the
+        # default file is the fallback when HOME is not /root. Whichever it
+        # picks, the keys are the tablet-sized ones.
+        mkdir -p /root/.matchbox /usr/share/matchbox-keyboard
+        cat "$LAYOUT" > /root/.matchbox/keyboard.xml 2>/dev/null
+        cat "$LAYOUT" > /usr/share/matchbox-keyboard/keyboard.xml 2>/dev/null
+        sync
     fi
     matchbox-keyboard >/dev/null 2>&1 &
     echo "osk: matchbox-keyboard"
