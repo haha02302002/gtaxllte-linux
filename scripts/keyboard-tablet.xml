@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  keyboard-tablet.xml - the on-screen keyboard for the SM-T585.
+
+  Written for this panel. The screen is 1200 px wide, so ten keys of equal
+  width are ~120 px each - wide enough for a thumb - and five such rows
+  come to roughly half the screen height, which leaves the app visible
+  above the keyboard.
+
+  The layout is deliberately plain: one shift level, no dead keys, and
+  large Shift / Backspace / Enter, because this keyboard exists to type a
+  Wi-Fi password or a URL on a tablet, not to write documents.
+
+  Installed at /usr/share/matchbox-keyboard/keyboard-tablet.xml and copied
+  to /root/.matchbox/keyboard.xml, the path matchbox-keyboard reads for
+  its active layout at start-up.
+-->
+<keyboard>
+  <layout id="tablet">
+    <row>
+      <key><default display="1"/><shifted display="!"/></key>
+      <key><default display="2"/><shifted display="@"/></key>
+      <key><default display="3"/><shifted display="#"/></key>
+      <key><default display="4"/><shifted display="$"/></key>
+      <key><default display="5"/><shifted display="%"/></key>
+      <key><default display="6"/><shifted display="^"/></key>
+      <key><default display="7"/><shifted display="&"/></key>
+      <key><default display="8"/><shifted display="*"/></key>
+      <key><default display="9"/><shifted display="("/></key>
+      <key><default display="0"/><shifted display=")"/></key>
+    </row>
+    <row>
+      <key><default display="q"/><shifted display="Q"/></key>
+      <key><default display="w"/><shifted display="W"/></key>
+      <key><default display="e"/><shifted display="E"/></key>
+      <key><default display="r"/><shifted display="R"/></key>
+      <key><default display="t"/><shifted display="T"/></key>
+      <key><default display="y"/><shifted display="Y"/></key>
+      <key><default display="u"/><shifted display="U"/></key>
+      <key><default display="i"/><shifted display="I"/></key>
+      <key><default display="o"/><shifted display="O"/></key>
+      <key><default display="p"/><shifted display="P"/></key>
+    </row>
+    <row>
+      <key><default display="a"/><shifted display="A"/></key>
+      <key><default display="s"/><shifted display="S"/></key>
+      <key><default display="d"/><shifted display="D"/></key>
+      <key><default display="f"/><shifted display="F"/></key>
+      <key><default display="g"/><shifted display="G"/></key>
+      <key><default display="h"/><shifted display="H"/></key>
+      <key><default display="j"/><shifted display="J"/></key>
+      <key><default display="k"/><shifted display="K"/></key>
+      <key><default display="l"/><shifted display="L"/></key>
+      <key width="1500"><default display="Bksp" action="backspace"/></key>
+    </row>
+    <row>
+      <key width="1500"><default display="Shift" action="shift"/></key>
+      <key><default display="z"/><shifted display="Z"/></key>
+      <key><default display="x"/><shifted display="X"/></key>
+      <key><default display="c"/><shifted display="C"/></key>
+      <key><default display="v"/><shifted display="V"/></key>
+      <key><default display="b"/><shifted display="B"/></key>
+      <key><default display="n"/><shifted display="N"/></key>
+      <key><default display="m"/><shifted display="M"/></key>
+      <key><default display=","/><shifted display="<"/></key>
+      <key><default display="."/><shifted display=">"/></key>
+    </row>
+    <row>
+      <space width="8000"/>
+      <key width="2000"><default display="Enter" action="return"/></key>
+    </row>
+  </layout>
+</keyboard>

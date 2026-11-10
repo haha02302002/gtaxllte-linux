@@ -229,6 +229,15 @@ grep -E '\(EE\)|Using input driver|libinput|no screens' /var/log/Xorg.0.log 2>/d
 # 1200x1920; matchbox-keyboard 0.1.1 has no size flag, its layout file sets
 # key size, so it is started plainly (the layout in ~/.matchbox does sizing).
 if command -v matchbox-keyboard >/dev/null 2>&1; then
+    # The tablet layout has to live in ~/.matchbox/keyboard.xml: that is the
+    # file matchbox-keyboard reads at start-up, and without it every key is
+    # the stock 30 px size. cat (not cp) so the write is one syscall and a
+    # reset cannot leave an empty file behind.
+    LAYOUT=/usr/share/matchbox-keyboard/keyboard-tablet.xml
+    if [ -f "$LAYOUT" ]; then
+        mkdir -p /root/.matchbox
+        cat "$LAYOUT" > /root/.matchbox/keyboard.xml 2>/dev/null && sync
+    fi
     matchbox-keyboard >/dev/null 2>&1 &
     echo "osk: matchbox-keyboard"
 elif command -v xvkbd >/dev/null 2>&1; then
