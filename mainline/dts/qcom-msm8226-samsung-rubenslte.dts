@@ -35,6 +35,22 @@
 	compatible = "samsung,rubenslte", "qcom,apq8026";
 	chassis-type = "tablet";
 
+	/*
+	 * qcom-msm8226.dtsi only carries a placeholder (reg = <0x0 0x0>), so
+	 * without this the kernel is told it has no RAM and hangs silently
+	 * before printing anything. These four ranges are the System RAM
+	 * entries of this tablet's live /proc/iomem under stock TWRP:
+	 *   00000000-083fffff  0a400000-0cafffff
+	 *   0f600000-0f9fffff  0ff00000-5f2fffff
+	 */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x08400000>,
+		      <0x0a400000 0x02c00000>,
+		      <0x0f600000 0x00400000>,
+		      <0x0ff00000 0x4f400000>;
+	};
+
 	aliases {
 		display0 = &framebuffer0;
 		mmc0 = &sdhc_1; /* SDC1 eMMC slot */
