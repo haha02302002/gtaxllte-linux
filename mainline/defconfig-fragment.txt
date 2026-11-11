@@ -37,3 +37,17 @@ CONFIG_PSTORE_RAM=y
 CONFIG_PSTORE_CONSOLE=y
 CONFIG_PSTORE_PMSG=y
 CONFIG_PANIC_TIMEOUT=10
+
+# Console that does not need the panel: mainline has no DSI driver for this
+# tablet yet, so aboot blanks the screen at handoff and tty0 never appears.
+# A built-in legacy g_serial gadget gives a console over the USB cable instead,
+# which is the only channel available for early bring-up logs.
+CONFIG_USB=y
+CONFIG_USB_GADGET=y
+CONFIG_USB_CHIPIDEA=y
+CONFIG_USB_CHIPIDEA_UDC=y
+CONFIG_USB_GADGET_VBUS_DRAW=500
+CONFIG_USB_G_SERIAL=y
+CONFIG_U_SERIAL_CONSOLE=y
+CONFIG_USB_LIBCOMPOSITE=y
+CONFIG_EXTCON=y

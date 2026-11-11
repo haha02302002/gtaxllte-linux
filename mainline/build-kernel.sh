@@ -79,6 +79,14 @@ cat "$OUT/zImage" "$OUT/rubenslte.dtb" > "$OUT/zImage-dtb"
 
 # Pack with the bundled python packer: the CI image has no mkbootimg, and an
 # empty boot.img on the release is worse than none.
+# QCDT + SEANDROIDENFORCE image: the form stock Samsung aboot accepts.
+# The console is on the USB gadget (ttyGS0) because the panel has no driver yet.
+if [ -f "$here/mkbootimg_qcdt.py" ]; then
+	echo ">>> packaging QCDT boot image for stock aboot"
+	python3 "$here/mkqcdt.py" --dtb "$OUT/rubenslte.dtb" --out "$OUT/rubenslte-dt.img"
+	python3 "$here/mkbootimg_qcdt.py" --kernel "$OUT/zImage" --dt "$OUT/rubenslte-dt.img" 		--output "$OUT/boot-qcdt.img" 		--cmdline "console=ttyGS0,115200 console=tty0 keep_bootcon loglevel=8 ignore_loglevel panic=10 g_serial.console=1"
+fi
+
 if [ -f "$here/mkbootimg.py" ]; then
 	echo ">>> packaging boot.img"
 	python3 "$here/mkbootimg.py" --kernel "$OUT/zImage-dtb" --output "$OUT/boot.img" \

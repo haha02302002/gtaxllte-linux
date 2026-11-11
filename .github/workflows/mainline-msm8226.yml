@@ -51,6 +51,7 @@ jobs:
             work/out-mainline/zImage-dtb
             work/out-mainline/rubenslte.dtb
             work/out-mainline/boot.img
+            work/out-mainline/boot-qcdt.img
           if-no-files-found: warn
 
       - name: Attach to release
@@ -63,10 +64,12 @@ jobs:
             (SM-T360 / SM-T365, codename rubenslte, Qualcomm APQ8026 / msm8226).
 
             Files: zImage, rubenslte.dtb, zImage-dtb, boot.img.
-            Flash through lk2nd, not stock Samsung aboot.
+            boot-qcdt.img is for stock Samsung aboot (QCDT + SEANDROIDENFORCE).
+            Console comes out on the USB gadget (ttyGS0), not the panel.
           files: |
             work/out-mainline/zImage
             work/out-mainline/zImage-dtb
             work/out-mainline/rubenslte.dtb
             work/out-mainline/boot.img
+            work/out-mainline/boot-qcdt.img
           fail_on_unmatched_files: false
