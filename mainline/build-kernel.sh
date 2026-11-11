@@ -77,13 +77,19 @@ cp arch/arm/boot/zImage "$OUT/zImage"
 cp "arch/arm/boot/dts/qcom/$DTS_NAME.dtb" "$OUT/rubenslte.dtb"
 cat "$OUT/zImage" "$OUT/rubenslte.dtb" > "$OUT/zImage-dtb"
 
-if command -v mkbootimg >/dev/null 2>&1; then
+# Pack with the bundled python packer: the CI image has no mkbootimg, and an
+# empty boot.img on the release is worse than none.
+if [ -f "$here/mkbootimg.py" ]; then
 	echo ">>> packaging boot.img"
+	python3 "$here/mkbootimg.py" --kernel "$OUT/zImage-dtb" --output "$OUT/boot.img" \
+		--pagesize 2048 --base 0x00008000
+elif command -v mkbootimg >/dev/null 2>&1; then
+	echo ">>> packaging boot.img (mkbootimg)"
 	: > "$OUT/ramdisk-empty"
 	mkbootimg --kernel "$OUT/zImage-dtb" --ramdisk "$OUT/ramdisk-empty" \
-		--pagesize 2048 --base 0x00000000 -o "$OUT/boot.img"
+		--pagesize 2048 --base 0x00008000 -o "$OUT/boot.img"
 else
-	echo ">>> mkbootimg not found - zImage/zImage-dtb/dtb are still usable"
+	echo ">>> no packer available - zImage/zImage-dtb/dtb are still usable"
 fi
 
 echo ">>> done"
