@@ -18,6 +18,13 @@ CONFIG_MMC_SDHCI_MSM=y
 CONFIG_PHY_QCOM_USB_HS=y
 CONFIG_EXT4_FS=y
 
+# Device tree delivery: the DTB is appended to zImage (zImage-dtb), and lk2nd
+# has no rubens entry, so the kernel must prefer the appended tree over whatever
+# the bootloader hands it. Without this the kernel runs on an empty/wrong DT -
+# which is a silent hang before any console exists.
+CONFIG_ARM_APPENDED_DTB=y
+CONFIG_ARM_ATAG_DTB_COMPAT=y
+
 # Observability: without these a hang is silent. fbcon prints kernel messages
 # to the simple-framebuffer, pstore survives a panic and is readable from TWRP.
 CONFIG_VT=y
