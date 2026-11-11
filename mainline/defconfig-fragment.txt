@@ -17,3 +17,16 @@ CONFIG_REGULATOR_FIXED_VOLTAGE=y
 CONFIG_MMC_SDHCI_MSM=y
 CONFIG_PHY_QCOM_USB_HS=y
 CONFIG_EXT4_FS=y
+
+# Observability: without these a hang is silent. fbcon prints kernel messages
+# to the simple-framebuffer, pstore survives a panic and is readable from TWRP.
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FONT_8x16=y
+CONFIG_MAGIC_SYSRQ=y
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+CONFIG_PANIC_TIMEOUT=10

@@ -71,7 +71,10 @@ def main():
     ap.add_argument("--output", required=True)
     ap.add_argument("--pagesize", type=int, default=2048)
     ap.add_argument("--base", default="0x00008000")
-    ap.add_argument("--cmdline", default="console=ttyMSM0,115200n8 earlycon")
+    # tty0 (fbcon) is what makes a hung boot visible on the tablet's screen;
+    # there is no accessible UART, so ttyMSM0 alone shows nothing.
+    ap.add_argument("--cmdline",
+                    default="console=tty0 console=ttyMSM0,115200n8 earlycon panic=10")
     a = ap.parse_args()
 
     kernel = open(a.kernel, "rb").read()
