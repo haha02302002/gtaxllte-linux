@@ -18,16 +18,30 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
+      # apt on the hosted runners fails intermittently (exit code 100, mirror
+      # metadata), and a failed install used to kill the whole build before a
+      # single object file was compiled. Retry it instead of giving up.
       - name: Install cross toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-arm-linux-gnueabihf bc bison flex libssl-dev libelf-dev \
-            device-tree-compiler python3 rsync
+          ok=0
+          for attempt in 1 2 3 4; do
+            echo ">>> apt attempt $attempt"
+            if sudo apt-get update -o Acquire::Retries=5 && \
+               sudo apt-get install -y --no-install-recommends \
+                 gcc-arm-linux-gnueabihf bc bison flex libssl-dev libelf-dev \
+                 device-tree-compiler python3 rsync; then
+              ok=1
+              break
+            fi
+            sleep 20
+          done
+          [ "$ok" = 1 ] || { echo "toolchain install failed after 4 attempts"; exit 1; }
+          arm-linux-gnueabihf-gcc --version | head -1
+          dtc --version
 
       - name: Build kernel and dtb
         run: |
@@ -63,7 +77,7 @@ jobs:
             Mainline kernel and device tree for the Samsung Galaxy Tab Active 8.0
             (SM-T360 / SM-T365, codename rubenslte, Qualcomm APQ8026 / msm8226).
 
-            Files: zImage, rubenslte.dtb, zImage-dtb, boot.img.
+            Files: zImage, rubenslte.dtb, zImage-dtb, boot.img, boot-qcdt.img.
             boot-qcdt.img is for stock Samsung aboot (QCDT + SEANDROIDENFORCE).
             Console comes out on the USB gadget (ttyGS0), not the panel.
           files: |
