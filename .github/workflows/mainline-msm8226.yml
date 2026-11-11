@@ -1,0 +1,72 @@
+name: mainline-msm8226
+
+# Builds the mainline kernel + device tree for the Samsung SM-T365 (rubenslte).
+# The Windows host has no toolchain, so this is the build path.
+#
+# Artifacts are attached to the "mainline-msm8226" release as well, so the
+# kernel can be downloaded without a GitHub token.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'mainline/**'
+      - '.github/workflows/mainline-msm8226.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-linux-gnueabihf bc bison flex libssl-dev libelf-dev \
+            device-tree-compiler python3 rsync
+
+      - name: Build kernel and dtb
+        run: |
+          chmod +x mainline/build-kernel.sh
+          JOBS="$(nproc)" bash mainline/build-kernel.sh
+
+      - name: Check the dtb compiled and describes the tablet
+        run: |
+          dtc -I dtb -O dts work/out-mainline/rubenslte.dtb -o work/out-mainline/rubenslte-check.dts
+          grep -q 'Samsung Galaxy Tab Active' work/out-mainline/rubenslte-check.dts
+          grep -q 'simple-framebuffer' work/out-mainline/rubenslte-check.dts
+          grep -q 'syna,rmi4-i2c' work/out-mainline/rubenslte-check.dts
+          echo "dtb OK: $(stat -c %s work/out-mainline/rubenslte.dtb) bytes"
+          echo "zImage: $(stat -c %s work/out-mainline/zImage) bytes"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rubenslte-mainline
+          path: |
+            work/out-mainline/zImage
+            work/out-mainline/zImage-dtb
+            work/out-mainline/rubenslte.dtb
+            work/out-mainline/boot.img
+          if-no-files-found: warn
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mainline-msm8226
+          name: mainline msm8226 (SM-T365 rubenslte)
+          body: |
+            Mainline kernel and device tree for the Samsung Galaxy Tab Active 8.0
+            (SM-T360 / SM-T365, codename rubenslte, Qualcomm APQ8026 / msm8226).
+
+            Files: zImage, rubenslte.dtb, zImage-dtb, boot.img.
+            Flash through lk2nd, not stock Samsung aboot.
+          files: |
+            work/out-mainline/zImage
+            work/out-mainline/zImage-dtb
+            work/out-mainline/rubenslte.dtb
+            work/out-mainline/boot.img
+          fail_on_unmatched_files: false

@@ -1,0 +1,11 @@
+* text=auto
+
+# The build script and the device tree must keep LF or CI breaks.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.dts   text eol=lf
+*.dtsi  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.png   binary
