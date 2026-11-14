@@ -58,11 +58,13 @@ void brfb(int n)
 	};
 
 	if (n <= 0) {
-		/* first call ever: wipe the logo so bars cannot be confused with it */
 		fill(0, 0, FB_W, 1280, 0x00000000);
-		if (n == 0)
-			return;
-	} else if (n <= 7) {
+		return;
+	}
+	if (n == 1)
+		/* wipe the logo so the bars cannot be confused with it */
+		fill(0, 0, FB_W, 1280, 0x00000000);
+	if (n <= 7) {
 		fill(120 + (n - 1) * (BAR_W + 8), BAR_Y, BAR_W, BAR_H,
 		     colours[n - 1]);
 	}
