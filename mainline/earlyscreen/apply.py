@@ -40,7 +40,9 @@ def add_decls(path):
     """Declare the reporter in a translation unit that calls it."""
     with open(path, encoding='utf-8', newline='') as f:
         lines = f.readlines()
-    if any('brfb_panic' in ln for ln in lines):
+    # must look for the declaration itself: the inserted *call* also contains
+    # the name, and matching that skipped the prototype and broke -Werror
+    if any('extern void brfb_panic' in ln for ln in lines):
         return True
     for i, ln in enumerate(lines):
         if ln.startswith('#include'):
