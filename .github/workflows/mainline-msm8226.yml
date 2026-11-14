@@ -71,6 +71,7 @@ jobs:
             work/out-mainline/boot.img
             work/out-mainline/boot-qcdt.img
             work/out-mainline/greenpaint.img
+            work/linux-msm8226/.config
             ci-apt.log
           if-no-files-found: warn
 
@@ -97,5 +98,6 @@ jobs:
             work/out-mainline/boot.img
             work/out-mainline/boot-qcdt.img
             work/out-mainline/greenpaint.img
+            work/linux-msm8226/.config
             ci-apt.log
           fail_on_unmatched_files: false
