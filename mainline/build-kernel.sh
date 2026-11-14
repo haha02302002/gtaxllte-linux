@@ -100,5 +100,27 @@ else
 	echo ">>> no packer available - zImage/zImage-dtb/dtb are still usable"
 fi
 
+# Diagnostic payload: paints aboot's MDSS splash buffer green and halts. With no
+# console on this tablet, this is the only way to learn whether the bootloader
+# executes the kernel section at all - the greenpaint and the real kernel go out
+# as separate artifacts so one flash can settle it.
+if [ -f "$here/stub/greenpaint.S" ]; then
+	echo ">>> assembling the green-paint probe"
+	"${CROSS}as" -o "$OUT/greenpaint.o" "$here/stub/greenpaint.S"
+	"${CROSS}ld" -Ttext=0x8000 -o "$OUT/greenpaint.elf" "$OUT/greenpaint.o"
+	"${CROSS}objcopy" -O binary "$OUT/greenpaint.elf" "$OUT/greenpaint.bin"
+	python3 - "$OUT/greenpaint.bin" <<'PYGP'
+import struct, sys
+p = sys.argv[1]
+d = bytearray(open(p, 'rb').read())
+# zImage magic/start/end, the only header stock aboot looks at.
+d[0x24:0x30] = struct.pack('<III', 0x016f2818, 0x8000, 0x8000 + len(d))
+open(p, 'wb').write(bytes(d))
+print("  probe %d bytes with a zImage header" % len(d))
+PYGP
+	python3 "$here/mkqcdt.py" --dtb "$OUT/rubenslte.dtb" --out "$OUT/greenpaint-dt.img"
+	python3 "$here/mkbootimg_qcdt.py" --kernel "$OUT/greenpaint.bin" 		--dt "$OUT/greenpaint-dt.img" --output "$OUT/greenpaint.img" --cmdline "console=null"
+fi
+
 echo ">>> done"
 ls -l "$OUT"
