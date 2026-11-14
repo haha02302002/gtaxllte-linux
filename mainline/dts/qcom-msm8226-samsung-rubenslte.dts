@@ -79,11 +79,16 @@
 
 		framebuffer0: framebuffer@3200000 {
 			compatible = "simple-framebuffer";
-			reg = <0x03200000 0x800000>;
+			/* aboot leaves the MDSS splash buffer here (its own DTB says
+			 * memblock-reserve = <0x03200000 0xFA0000>), so the kernel can
+			 * print on the panel before any DSI driver exists. 32bpp:
+			 * 800 * 1280 * 4 = 0x3E8000 per frame, four frames reserved.
+			 */
+			reg = <0x03200000 0x0fa0000>;
 			width = <800>;
 			height = <1280>;
-			stride = <(800 * 3)>;
-			format = "r8g8b8";
+			stride = <(800 * 4)>;
+			format = "a8r8g8b8";
 		};
 	};
 
@@ -224,7 +229,7 @@
 		ranges;
 
 		framebuffer@3200000 {
-			reg = <0x03200000 0x800000>;
+			reg = <0x03200000 0x0fa0000>;
 			no-map;
 		};
 

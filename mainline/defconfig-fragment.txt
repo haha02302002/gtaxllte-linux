@@ -51,3 +51,9 @@ CONFIG_USB_G_SERIAL=y
 CONFIG_U_SERIAL_CONSOLE=y
 CONFIG_USB_LIBCOMPOSITE=y
 CONFIG_EXTCON=y
+
+# Print on the panel through aboot's splash buffer: there is no mainline
+# DSI panel driver for this 800x1280 S6D7AA0 yet, so simplefb+fbcon is the
+# only early text channel on the screen itself.
+CONFIG_FB_SIMPLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
