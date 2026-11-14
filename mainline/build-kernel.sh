@@ -63,6 +63,13 @@ fi
 
 cd "$WORK"
 
+# Paint progress into aboot's splash buffer from the first mapped moment, so a
+# hang before fbcon/simple-framebuffer is still visible on the panel.
+if [ -f "$here/earlyscreen/apply.py" ]; then
+	echo ">>> installing early on-panel progress reporter"
+	python3 "$here/earlyscreen/apply.py" "$WORK" || exit 1
+fi
+
 echo ">>> configuring"
 make ARCH=arm CROSS_COMPILE="$CROSS" qcom_defconfig
 if [ -f "$here/defconfig-fragment.txt" ]; then
