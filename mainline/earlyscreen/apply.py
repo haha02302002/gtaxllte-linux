@@ -77,9 +77,11 @@ def main():
     mk = os.path.join(tree, "init", "Makefile")
     with open(mk, encoding='utf-8', newline='') as f:
         s = f.read()
+    # Append, never prepend: init/Makefile starts with "obj-y := ...", which
+    # wipes anything added before it and leaves brfb undefined at link time.
     if 'bringup_fb.o' not in s:
-        with open(mk, 'w', encoding='utf-8', newline='') as f:
-            f.write("obj-y += bringup_fb.o\n" + s)
+        with open(mk, 'a', encoding='utf-8', newline='') as f:
+            f.write("\nobj-y += bringup_fb.o\n")
     print("  init/Makefile builds bringup_fb.o")
 
     main_c = os.path.join(tree, "init", "main.c")

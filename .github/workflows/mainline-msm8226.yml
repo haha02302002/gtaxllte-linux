@@ -49,6 +49,8 @@ jobs:
 
       - name: Build kernel and dtb
         run: |
+          # without pipefail a failed link still exits 0 here, because tee does
+          set -o pipefail
           chmod +x mainline/build-kernel.sh
           JOBS="$(nproc)" bash mainline/build-kernel.sh 2>&1 | tee -a ci-apt.log
 
