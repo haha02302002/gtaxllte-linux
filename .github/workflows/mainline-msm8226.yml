@@ -23,30 +23,34 @@ jobs:
       - uses: actions/checkout@v4
 
       # apt on the hosted runners fails intermittently (exit code 100, mirror
-      # metadata), and a failed install used to kill the whole build before a
-      # single object file was compiled. Retry it instead of giving up.
+      # metadata), and a failed install kills the build before a single object
+      # file is compiled - that has now cost two runs. Retry longer, and keep
+      # the output in ci-apt.log so the reason is readable from the release
+      # (Actions logs need a token, release assets do not).
       - name: Install cross toolchain
         run: |
+          set -o pipefail
           ok=0
-          for attempt in 1 2 3 4; do
-            echo ">>> apt attempt $attempt"
-            if sudo apt-get update -o Acquire::Retries=5 && \
+          for attempt in 1 2 3 4 5 6; do
+            echo ">>> apt attempt $attempt" | tee -a ci-apt.log
+            if sudo apt-get update -o Acquire::Retries=5 2>&1 | tee -a ci-apt.log && \
                sudo apt-get install -y --no-install-recommends \
                  gcc-arm-linux-gnueabihf bc bison flex libssl-dev libelf-dev \
-                 device-tree-compiler python3 rsync; then
+                 device-tree-compiler python3 rsync 2>&1 | tee -a ci-apt.log; then
               ok=1
               break
             fi
-            sleep 20
+            sleep 45
           done
-          [ "$ok" = 1 ] || { echo "toolchain install failed after 4 attempts"; exit 1; }
-          arm-linux-gnueabihf-gcc --version | head -1
-          dtc --version
+          echo "=== result: ok=$ok ===" | tee -a ci-apt.log
+          arm-linux-gnueabihf-gcc --version 2>&1 | head -1 | tee -a ci-apt.log
+          dtc --version 2>&1 | tee -a ci-apt.log
+          [ "$ok" = 1 ] || exit 1
 
       - name: Build kernel and dtb
         run: |
           chmod +x mainline/build-kernel.sh
-          JOBS="$(nproc)" bash mainline/build-kernel.sh
+          JOBS="$(nproc)" bash mainline/build-kernel.sh 2>&1 | tee -a ci-apt.log
 
       - name: Check the dtb compiled and describes the tablet
         run: |
@@ -66,9 +70,13 @@ jobs:
             work/out-mainline/rubenslte.dtb
             work/out-mainline/boot.img
             work/out-mainline/boot-qcdt.img
+            ci-apt.log
           if-no-files-found: warn
 
-      - name: Attach to release
+      # Publish the log even when the build failed: this is the only way to see
+      # what apt/kernel did, since the release is public and Actions logs are not.
+      - name: Publish build log
+        if: always()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mainline-msm8226
@@ -80,10 +88,12 @@ jobs:
             Files: zImage, rubenslte.dtb, zImage-dtb, boot.img, boot-qcdt.img.
             boot-qcdt.img is for stock Samsung aboot (QCDT + SEANDROIDENFORCE).
             Console comes out on the USB gadget (ttyGS0), not the panel.
+            ci-apt.log holds the toolchain/build output of the last run.
           files: |
             work/out-mainline/zImage
             work/out-mainline/zImage-dtb
             work/out-mainline/rubenslte.dtb
             work/out-mainline/boot.img
             work/out-mainline/boot-qcdt.img
+            ci-apt.log
           fail_on_unmatched_files: false
