@@ -1,0 +1,63 @@
+#!/bin/busybox sh
+# initramfs /init for the Samsung SM-T360 (rubenswifi) bring-up.
+#
+# This tablet has no usable console (no UART pins, no mainline DSI driver, and
+# the bootloader reboots on its own watchdog), so the only durable channel is
+# the 300 MiB "cache" partition. Nothing here needs a writable rootfs.
+export PATH=/bin
+
+mount -t proc     proc     /proc 2>/dev/null
+mount -t sysfs    sysfs    /sys  2>/dev/null
+mount -t devtmpfs devtmpfs /dev  2>/dev/null
+
+REPORT=/report.txt
+{
+	echo "INIT-RAN mainline bringup initramfs"
+	echo "uptime: $(cat /proc/uptime 2>/dev/null)"
+	echo "--- version ---"
+	cat /proc/version
+	echo "--- cmdline ---"
+	cat /proc/cmdline
+	echo "--- memory ---"
+	grep -E "MemTotal|MemFree" /proc/meminfo
+	echo "--- system ram ---"
+	grep "System RAM" /proc/iomem
+	echo "--- block devices ---"
+	ls -l /dev/mmcblk* 2>&1
+	cat /proc/partitions
+	echo "--- dmesg ---"
+	dmesg
+} > $REPORT 2>&1
+
+# Find the cache partition: try the fixed path first, then the device whose
+# size is exactly 614400 sectors (300 MiB), which is how it appears even when
+# the recovery build does not create /dev/block/by-name/cache.
+CACHE=""
+for d in /dev/mmcblk0p24 /dev/block/mmcblk0p24 /dev/block/by-name/cache \
+         /dev/block/bootdevice/by-name/cache; do
+	if [ -b "$d" ]; then CACHE=$d; break; fi
+done
+if [ -z "$CACHE" ]; then
+	for b in /sys/class/block/mmcblk0p* /sys/class/block/mmcblk1p*; do
+		if [ "$(cat $b/size 2>/dev/null)" = "614400" ]; then
+			CACHE=/dev/$(basename $b)
+			break
+		fi
+	done
+fi
+
+echo "cache: [$CACHE]" >> $REPORT
+
+# Write the same report to every plausible place, so one of them lands.
+for out in "$CACHE" /dev/mmcblk0p24 /dev/mmcblk0p16; do
+	if [ -n "$out" ] && [ -b "$out" ]; then
+		if dd if=$REPORT of=$out bs=4096 conv=fsync 2>/dev/null; then
+			echo "wrote report to $out" >> /dev/null
+			sync
+			break
+		fi
+	fi
+done
+
+# Idle. The bootloader watchdog is the only thing that will reset us.
+while true; do sleep 3600; done
