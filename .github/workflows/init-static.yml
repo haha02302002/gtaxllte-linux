@@ -1,0 +1,58 @@
+name: init-static
+
+# Fast job: build the statically linked initramfs /init.
+#
+# The busybox from TWRP is a dynamic Android PIE binary (PT_INTERP /sbin/linker)
+# and cannot run in a bare initramfs, so the bring-up init must be static and is
+# compiled here instead of the full kernel build, which takes ~20 minutes.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'mainline/initramfs/init.c'
+      - '.github/workflows/init-static.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross compiler
+        run: |
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            if sudo apt-get update -o Acquire::Retries=5 && \
+               sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf libc6-dev-armhf-cross; then
+              ok=1
+              break
+            fi
+            sleep 30
+          done
+          [ "$ok" = 1 ] || exit 1
+          arm-linux-gnueabihf-gcc --version | head -1
+
+      - name: Build static init
+        run: |
+          arm-linux-gnueabihf-gcc -static -Os -fno-stack-protector \
+            -o init-arm-static mainline/initramfs/init.c
+          ls -l init-arm-static
+          file init-arm-static || true
+          arm-linux-gnueabihf-readelf -l init-arm-static | head -20
+          echo "must be static:"; arm-linux-gnueabihf-readelf -l init-arm-static | grep -c INTERP || true
+
+      - name: Publish the binary
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: init-static
+          name: static initramfs init (SM-T360 bring-up)
+          body: |
+            Statically linked /init for the rubenswifi bring-up initramfs.
+            Writes a boot report (version, cmdline, meminfo, iomem, partitions)
+            to the cache partition, then reboots.
+          files: init-arm-static
+          fail_on_unmatched_files: true
