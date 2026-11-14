@@ -1,101 +1,125 @@
 /* Static initramfs /init for the Samsung SM-T360 (rubenswifi) bring-up.
  *
- * The busybox pulled out of TWRP is a dynamic Android PIE binary (PT_INTERP
- * /sbin/linker), so it cannot execute in a bare initramfs - which is why every
- * earlier attempt produced no log anywhere. This binary is built with -static
- * and needs nothing but the kernel.
+ * Needs nothing but the kernel: the busybox shipped in TWRP is a dynamic
+ * Android PIE (PT_INTERP /sbin/linker) and cannot execute in an initramfs,
+ * which is why earlier attempts produced no log at all.
  *
- * It mounts the pseudo filesystems, collects a boot report and writes it to the
- * "cache" partition (the only durable channel: no UART, no usable console, and
- * the bootloader watchdog resets the board).
+ * The only durable channel is the "cache" partition. Device nodes may not
+ * exist (devtmpfs is optional, and a vendor kernel may not mount it), so this
+ * creates the node itself from the major:minor in sysfs before writing.
+ *
+ * It reboots 5 s after starting: a quick reboot after boot means /init ran,
+ * a long gap then reboot means the kernel never reached userspace.
  *
  * Build: arm-linux-gnueabihf-gcc -static -Os -o init init.c
  */
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-static int append(const char *out, int cap, const char *text)
+static char report[512 * 1024];
+static int rlen;
+
+static void add(const char *text)
 {
-	int n = (int)strlen(out);
-	if (n >= cap - 1)
-		return n;
-	int room = cap - 1 - n;
+	int room = (int)sizeof(report) - 1 - rlen;
 	int len = (int)strlen(text);
+	if (room <= 0)
+		return;
 	if (len > room)
 		len = room;
-	memcpy((char *)out + n, text, (size_t)len);
-	((char *)out)[n + len] = 0;
-	return n + len;
+	memcpy(report + rlen, text, (size_t)len);
+	rlen += len;
+	report[rlen] = 0;
 }
 
-static int append_file(const char *out, int cap, const char *path)
+static void add_file(const char *path)
 {
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		append(out, cap, "(cannot open)");
-		return 0;
+		add("(cannot open)");
+		return;
 	}
-	char buf[8192];
+	char buf[4096];
 	int n, total = 0;
-	while ((n = (int)read(fd, buf, sizeof(buf) - 1)) > 0 && total < 8 * 1024 * 1024) {
+	while ((n = (int)read(fd, buf, sizeof(buf) - 1)) > 0) {
 		buf[n] = 0;
-		append(out, cap, buf);
+		add(buf);
 		total += n;
-		if (total > 200 * 1024)          /* keep the report readable */
+		if (total > 120 * 1024)
 			break;
 	}
 	close(fd);
-	return total;
 }
 
-/* Locate the cache partition: fixed path first, then whatever block device is
- * exactly 614400 sectors (300 MiB), independent of recovery fstab quirks. */
-static int find_cache(char *path, size_t len)
+/* major:minor for a partition, straight from sysfs. */
+static int part_devnum(int part, int *maj, int *min)
 {
-	static const char *candidates[] = {
-		"/dev/mmcblk0p24", "/dev/block/mmcblk0p24",
-		"/dev/block/bootdevice/by-name/cache", "/dev/block/by-name/cache", 0
-	};
-	for (int i = 0; candidates[i]; i++) {
-		if (access(candidates[i], F_OK) == 0) {
-			snprintf(path, len, "%s", candidates[i]);
-			return 0;
-		}
-	}
-	for (int part = 0; part < 64; part++) {
-		char p[64], size[32];
-		snprintf(p, sizeof(p), "/sys/class/block/mmcblk0p%d/size", part);
-		int fd = open(p, O_RDONLY);
-		if (fd < 0)
-			continue;
-		int n = (int)read(fd, size, sizeof(size) - 1);
-		close(fd);
-		if (n <= 0)
-			continue;
-		size[n] = 0;
-		if (strncmp(size, "614400", 6) == 0) {
-			snprintf(path, len, "/dev/mmcblk0p%d", part);
-			return 0;
-		}
-	}
-	return -1;
+	char p[64], buf[32];
+	snprintf(p, sizeof(p), "/sys/class/block/mmcblk0p%d/dev", part);
+	int fd = open(p, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	int n = (int)read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0)
+		return -1;
+	buf[n] = 0;
+	return sscanf(buf, "%d:%d", maj, min) == 2 ? 0 : -1;
 }
 
-static int write_report(const char *path, const char *data, int len)
+/* Sector count for a partition, from sysfs. */
+static unsigned long part_sectors(int part)
 {
+	char p[64], buf[32];
+	snprintf(p, sizeof(p), "/sys/class/block/mmcblk0p%d/size", part);
+	int fd = open(p, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	int n = (int)read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0)
+		return 0;
+	buf[n] = 0;
+	return strtoul(buf, NULL, 10);
+}
+
+static int node_for(int part)
+{
+	int maj, min;
+	if (part_devnum(part, &maj, &min) != 0)
+		return -1;
+	char path[64];
+	snprintf(path, sizeof(path), "/dev/bringup-p%d", part);
+	unlink(path);
+	if (mknod(path, S_IFBLK | 0600, makedev(maj, min)) != 0) {
+		char legacy[64];
+		snprintf(legacy, sizeof(legacy), "/dev/mmcblk0p%d", part);
+		if (mknod(legacy, S_IFBLK | 0600, makedev(maj, min)) == 0)
+			return part;
+		return -1;
+	}
+	return part;
+}
+
+static int write_to(int part)
+{
+	char path[64];
+	snprintf(path, sizeof(path), "/dev/bringup-p%d", part);
 	int fd = open(path, O_WRONLY);
 	if (fd < 0)
 		return -1;
-	int n = (int)write(fd, data, (size_t)len);
+	int n = (int)write(fd, report, (size_t)rlen);
 	fsync(fd);
 	close(fd);
-	return n == len ? 0 : -1;
+	return n == rlen ? 0 : -1;
 }
 
 int main(void)
@@ -107,39 +131,47 @@ int main(void)
 	mount("sysfs", "/sys", "sysfs", 0, NULL);
 	mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
 
-	static char report[512 * 1024];
-	report[0] = 0;
-	append(report, sizeof(report), "INIT-RAN static bringup init\n");
-	append(report, sizeof(report), "--- version ---\n");
-	append_file(report, sizeof(report), "/proc/version");
-	append(report, sizeof(report), "\n--- cmdline ---\n");
-	append_file(report, sizeof(report), "/proc/cmdline");
-	append(report, sizeof(report), "\n--- memory ---\n");
-	append_file(report, sizeof(report), "/proc/meminfo");
-	append(report, sizeof(report), "\n--- iomem ---\n");
-	append_file(report, sizeof(report), "/proc/iomem");
-	append(report, sizeof(report), "\n--- partitions ---\n");
-	append_file(report, sizeof(report), "/proc/partitions");
+	add("INIT-RAN static bringup init\n");
+	add("--- version ---\n");   add_file("/proc/version");   add("\n");
+	add("--- cmdline ---\n");   add_file("/proc/cmdline");   add("\n");
+	add("--- meminfo ---\n");   add_file("/proc/meminfo");   add("\n");
+	add("--- iomem ---\n");     add_file("/proc/iomem");     add("\n");
+	add("--- partitions ---\n"); add_file("/proc/partitions"); add("\n");
 
-	char cache[64];
-	int have = find_cache(cache, sizeof(cache)) == 0;
-	char line[128];
-	snprintf(line, sizeof(line), "\n--- cache device: %s ---\n", have ? cache : "NOT FOUND");
-	append(report, sizeof(report), line);
+	/* cache is 614400 sectors (300 MiB); fall back to the known numbers. */
+	int target = -1;
+	for (int p = 0; p < 64; p++) {
+		if (part_sectors(p) == 614400UL) { target = p; break; }
+	}
+	if (target < 0)
+		target = 24;
 
-	int len = (int)strlen(report);
-	int ok = 0;
-	if (have && write_report(cache, report, len) == 0)
-		ok = 1;
-	if (!ok && write_report("/dev/mmcblk0p16", report, len) == 0)
-		ok = 2;
+	char note[96];
+	snprintf(note, sizeof(note), "\n--- writing to mmcblk0p%d ---\n", target);
+	add(note);
 
-	/* Reboot so the next stage (recovery/TWRP) can read the report even if no
-	 * watchdog is armed. */
+	int wrote = -1;
+	for (int attempt = 0; attempt < 3 && wrote != 0; attempt++) {
+		if (node_for(target) >= 0)
+			wrote = write_to(target);
+		if (wrote != 0)
+			sleep(1);
+	}
+	/* fota as a second chance, in case cache is not writable */
+	if (wrote != 0 && node_for(16) >= 0)
+		wrote = write_to(16);
+
+	add(wrote == 0 ? "\nREPORT-WRITTEN\n" : "\nREPORT-WRITE-FAILED\n");
+	if (wrote == 0) {
+		int t = target;
+		if (node_for(t) >= 0)
+			write_to(t);
+	}
+
 	sync();
-	sleep(3);
+	sleep(5);            /* short: a fast reboot means /init really ran */
+	sync();
 	reboot(RB_AUTOBOOT);
-
 	for (;;)
 		pause();
 }
