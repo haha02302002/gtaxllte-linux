@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
+ * Samsung Galaxy Tab Active (SM-T360, codename rubenswifi)
+ *
+ * Identity taken from the bootloader, which cannot be faked by a TWRP build:
+ *   androidboot.bootloader=T360XXS1BRI2  samsung.hardware=SM-T360
+ *   connie=SM-T360_OPEN_EUR              androidboot.baseband=apq
+ * The ro.product.device=rubenslte / SM-T365 properties on this unit come from
+ * a TWRP built off another tablet's tree and are wrong.
+ *
  * Samsung Galaxy Tab Active 8.0 (SM-T360 / SM-T365), codename "rubens".
  *
  * Derived from qcom-apq8026-samsung-milletwifi.dts (Tab 4 8.0, same APQ8026,
@@ -31,8 +39,8 @@
 /delete-node/ &wcnss_region;
 
 / {
-	model = "Samsung Galaxy Tab Active 8.0";
-	compatible = "samsung,rubenslte", "qcom,apq8026";
+	model = "Samsung Galaxy Tab Active (SM-T360)";
+	compatible = "samsung,rubenswifi", "qcom,apq8026";
 	chassis-type = "tablet";
 
 	/*
