@@ -54,12 +54,20 @@ jobs:
 
       - name: Check the dtb compiled and describes the tablet
         run: |
-          dtc -I dtb -O dts work/out-mainline/rubenslte.dtb -o work/out-mainline/rubenslte-check.dts
-          grep -q 'Samsung Galaxy Tab Active' work/out-mainline/rubenslte-check.dts
-          grep -q 'simple-framebuffer' work/out-mainline/rubenslte-check.dts
-          grep -q 'syna,rmi4-i2c' work/out-mainline/rubenslte-check.dts
-          echo "dtb OK: $(stat -c %s work/out-mainline/rubenslte.dtb) bytes"
+          # Verify by reading the dtb's own string block: no dtc, no root, and
+          # every expectation is reported instead of dying on the first miss.
+          ls -l work/out-mainline/rubenslte.dtb
+          ok=1
+          for want in 'Samsung Galaxy Tab Active' 'simple-framebuffer' 'syna,rmi4-i2c' 'qcom,msm-id'; do
+            if grep -aq "$want" work/out-mainline/rubenslte.dtb; then
+              echo "  dtb has     : $want"
+            else
+              echo "  DTB MISSING : $want"
+              ok=0
+            fi
+          done
           echo "zImage: $(stat -c %s work/out-mainline/zImage) bytes"
+          [ "$ok" = 1 ] || exit 1
 
       - uses: actions/upload-artifact@v4
         with:
