@@ -186,9 +186,17 @@ static void dump_ring(void)
 	int fd, n, i, j;
 
 	add("\n--- RINGLOG (0x30000000) ---\n");
+	/* /sys/class/mem/mem/dev does not exist on this vendor kernel, and /dev/mem
+	 * is simply character device 1:1, so create it directly.
+	 */
 	if (mknod_from_sysfs("/sys/class/mem/mem/dev", "/dev/bringup-mem", 0) != 0) {
-		add("DEVMEM-NONODE\n");
-		return;
+		unlink("/dev/bringup-mem");
+		if (mknod("/dev/bringup-mem", S_IFCHR | 0600, makedev(1, 1)) != 0 &&
+		    mknod("/dev/mem", S_IFCHR | 0600, makedev(1, 1)) != 0) {
+			add("DEVMEM-NONODE\n");
+			return;
+		}
+		add("DEVMEM-NODE-1:1\n");
 	}
 	fd = open("/dev/bringup-mem", O_RDONLY);
 	if (fd < 0) {
@@ -238,7 +246,11 @@ static void paint_fb(void)
 {
 	static const char *devs[] = { "/dev/graphics/fb0", "/dev/fb0", 0 };
 	static unsigned char buf[64 * 1024];
-	unsigned long total = 800UL * 1280UL * 4UL;
+	/* virtual_size is w,h - this panel reports 800,2560, i.e. TWO 1280-line
+	 * frames. Painting only the first leaves the visible one untouched, which
+	 * looks exactly like a dead panel. Paint every frame the device reports.
+	 */
+	unsigned long total = 800UL * 2560UL * 4UL;
 	int i, fd = -1;
 
 	for (i = 0; i < (int)sizeof(buf); i += 4) {
@@ -247,6 +259,20 @@ static void paint_fb(void)
 		buf[i + 1] = 0x00;
 		buf[i + 2] = 0xFF;
 		buf[i + 3] = 0x00;
+	}
+	{
+		char vs[64];
+		int fd2 = open("/sys/class/graphics/fb0/virtual_size", O_RDONLY);
+		if (fd2 >= 0) {
+			int n2 = (int)read(fd2, vs, sizeof(vs) - 1);
+			close(fd2);
+			if (n2 > 0) {
+				unsigned long w = 0, h = 0;
+				vs[n2] = 0;
+				if (sscanf(vs, "%lu,%lu", &w, &h) == 2 && w && h)
+					total = w * h * 4;
+			}
+		}
 	}
 	/* devtmpfs often has no node yet even though the class device exists */
 	mknod_from_sysfs("/sys/class/graphics/fb0/dev", "/dev/fb0", 0);

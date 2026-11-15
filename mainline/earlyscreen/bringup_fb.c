@@ -56,10 +56,12 @@ static void brl_slot(int slot, const char *text)
 	p[i] = 0;
 }
 
-static void fill(int x0, int y0, int w, int h, u32 colour)
+#define FRAME_BYTES (FB_W * 1280 * 4)	/* one 800x1280 frame, 0x3e8000 */
+
+static void fill_frame(int frame, int x0, int y0, int w, int h, u32 colour)
 {
 	/* resolved at call time: __va() is not a constant initializer here */
-	u32 *fb = (u32 *)__va(FB_PHYS);
+	u32 *fb = (u32 *)((u8 *)__va(FB_PHYS) + (unsigned long)frame * FRAME_BYTES);
 	int x, y;
 
 	for (y = y0; y < y0 + h && y < 1280; y++) {
@@ -71,6 +73,18 @@ static void fill(int x0, int y0, int w, int h, u32 colour)
 		for (x = 0; x < w && x0 + x < FB_W; x++)
 			row[x] = colour;
 	}
+}
+
+/* aboot reserves 0xfa0000 bytes here - four 1280-line frames - and which one
+ * the display controller is scanning out is not documented. Paint all of them,
+ * otherwise a marker can land in a buffer nobody sees and look like a hang.
+ */
+static void fill(int x0, int y0, int w, int h, u32 colour)
+{
+	int f;
+
+	for (f = 0; f < 4; f++)
+		fill_frame(f, x0, y0, w, h, colour);
 }
 
 void brfb_panic(void)
@@ -111,6 +125,11 @@ void brfb(int n)
 		fill(0, 0, FB_W, 1280, 0x00000000);
 		return;
 	}
+	if (n == 1)
+		/* wipe every frame, not just the first, so a stale splash or a
+		 * previous marker can never be mistaken for progress
+		 */
+		fill(0, 0, FB_W, 1280, 0x00000000);
 	if (n == 1)
 		/* wipe the logo so the bars cannot be confused with it */
 		fill(0, 0, FB_W, 1280, 0x00000000);
