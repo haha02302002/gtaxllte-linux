@@ -185,7 +185,7 @@ static void dump_ring(void)
 	unsigned char buf[4096];
 	int fd, n, i, j;
 
-	add("\n--- RINGLOG (0x3fe80000) ---\n");
+	add("\n--- RINGLOG (0x30000000) ---\n");
 	if (mknod_from_sysfs("/sys/class/mem/mem/dev", "/dev/bringup-mem", 0) != 0) {
 		add("DEVMEM-NONODE\n");
 		return;
@@ -195,7 +195,7 @@ static void dump_ring(void)
 		add("DEVMEM-NOOPEN\n");
 		return;
 	}
-	n = (int)pread(fd, buf, sizeof(buf), (off_t)0x3fe80000UL);
+	n = (int)pread(fd, buf, sizeof(buf), (off_t)0x30000000UL);
 	close(fd);
 	if (n <= 0) {
 		add("DEVMEM-NOREAD\n");

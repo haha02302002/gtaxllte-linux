@@ -15,7 +15,11 @@
 #include <linux/types.h>
 #include <linux/io.h>
 
-#define BRL_PHYS  0x3fe80000UL	/* 64 KiB RAM log, survives a reset */
+/* High RAM, far above anything aboot touches and outside Samsung's own sec_log
+ * window at 0x3fe00008 (which aboot rewrites every boot, so a log there would
+ * be erased before it could be read).
+ */
+#define BRL_PHYS  0x30000000UL	/* 64 KiB RAM log, survives a warm reset */
 #define FB_PHYS   0x03200000UL
 #define FB_W      800
 #define FB_STRIDE 3200
