@@ -75,7 +75,7 @@ if '.Lbrfb_start' not in s:
 \t\tsubs\tr4, r4, #1
 \t\tbne\t.Lbrfb_start
 \t\t/* also stamp the RAM log: this is what survives if the panel is dark */
-\t\tldr\tr5, =0x30000000
+\t\tldr\tr5, =0x035e8000
 \t\tldr\tr6, =0x50555242\t\t@ "BRUP"
 \t\tstr\tr6, [r5]
 \t\tmov\tr6, #0x32\t\t@ "2" -> written before any mapping exists

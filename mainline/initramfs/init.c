@@ -185,7 +185,40 @@ static void dump_ring(void)
 	unsigned char buf[4096];
 	int fd, n, i, j;
 
-	add("\n--- RINGLOG (0x30000000) ---\n");
+	add("\n--- RINGLOG (framebuffer frame 1) ---\n");
+	/* Read it straight out of /dev/fb0: raw RAM is blocked (ENXIO on /dev/mem)
+	 * but the framebuffer device opens and maps the same bytes.
+	 */
+	{
+		int ffd = open("/dev/fb0", O_RDONLY);
+		if (ffd >= 0) {
+			unsigned char fb4k[4096];
+			int got = (int)pread(ffd, fb4k, sizeof(fb4k), (off_t)0x3e8000UL);
+			close(ffd);
+			if (got > 0 && (fb4k[0] == 'B' || fb4k[0] == 'R')) {
+				add("fb-read magic: ");
+				for (i = 0; i < 5 && i < got; i++)
+					add((fb4k[i] >= 32 && fb4k[i] < 127) ?
+					    (char[]){ (char)fb4k[i], 0 } : ".");
+				add("\n");
+				for (j = 0; j < 24; j++) {
+					int off = 64 + j * 64;
+					if (off >= got) break;
+					if (!fb4k[off]) continue;
+					add("  slot ");
+					add((j < 10) ? (char[]){ (char)('0' + j), 0 } : "?") ;
+					add(": ");
+					for (i = 0; i < 63 && off + i < got && fb4k[off + i]; i++)
+						add((fb4k[off + i] >= 32 && fb4k[off + i] < 127) ?
+						    (char[]){ (char)fb4k[off + i], 0 } : "?");
+					add("\n");
+				}
+				return;
+			}
+			add("fb-read: no magic at frame 1\n");
+		}
+	}
+	mknod_from_sysfs("/sys/class/graphics/fb0/dev", "/dev/fb0", 0);
 	/* /sys/class/mem/mem/dev does not exist on this vendor kernel, and /dev/mem
 	 * is simply character device 1:1, so create it directly.
 	 */

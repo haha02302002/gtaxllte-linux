@@ -15,11 +15,16 @@
 #include <linux/types.h>
 #include <linux/io.h>
 
-/* High RAM, far above anything aboot touches and outside Samsung's own sec_log
- * window at 0x3fe00008 (which aboot rewrites every boot, so a log there would
- * be erased before it could be read).
+/* Where the log has to live.
+ *
+ * The vendor kernel refuses to open /dev/mem (ENXIO - raw RAM is blocked on
+ * this device), so a plain RAM address is unreadable on the next boot no matter
+ * what survived in it. /dev/fb0, however, opens fine and maps aboot's splash
+ * reservation at 0x03200000 (2 x 800x1280x4 = 0x7d0000 bytes). So the log is
+ * written into the first 4 KiB of the SECOND frame - a strip the bars never
+ * touch - and read back through the framebuffer on the next boot.
  */
-#define BRL_PHYS  0x30000000UL	/* 64 KiB RAM log, survives a warm reset */
+#define BRL_PHYS  0x035e8000UL	/* 0x03200000 + one 800x1280x4 frame */
 #define FB_PHYS   0x03200000UL
 #define FB_W      800
 #define FB_STRIDE 3200
@@ -121,18 +126,12 @@ void brfb(int n)
 		if (n >= 1 && n <= 7)
 			brl_slot(n, names[n]);
 	}
-	if (n <= 0) {
-		fill(0, 0, FB_W, 1280, 0x00000000);
+	if (n <= 0)
 		return;
-	}
-	if (n == 1)
-		/* wipe every frame, not just the first, so a stale splash or a
-		 * previous marker can never be mistaken for progress
-		 */
-		fill(0, 0, FB_W, 1280, 0x00000000);
-	if (n == 1)
-		/* wipe the logo so the bars cannot be confused with it */
-		fill(0, 0, FB_W, 1280, 0x00000000);
+	/* deliberately no full-screen wipe: the log lives in the top rows of the
+	 * second frame, and the bars sit at y=200..260, so neither destroys the
+	 * other and the splash is left alone
+	 */
 	if (n <= 7)
 		fill(120 + (n - 1) * (BAR_W + 8), BAR_Y, BAR_W, BAR_H,
 		     colours[n - 1]);
