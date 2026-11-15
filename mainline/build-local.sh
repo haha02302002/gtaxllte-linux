@@ -66,7 +66,10 @@ if '.Lbrfb_start' not in s:
     # instruction instead, and use push/pop so this assembles as ARM or Thumb.
     band = """\t\t/* bring-up paint: MMU is off, so this is a physical write into the
 \t\t * splash buffer aboot left the panel scanning out. */
-\t\tpush\t{r4, r5, r6}
+\t\t/* no stack here: sp is not established until later in head.S, and a
+\t\t * push at this point corrupts whatever aboot left in sp and takes the
+\t\t * decompressor down before anything can be recorded. r4-r6 are free.
+\t\t */
 \t\tldr\tr5, =0x03200000
 \t\tldr\tr6, =0x00107bff
 \t\tmov\tr4, #4096
@@ -80,7 +83,6 @@ if '.Lbrfb_start' not in s:
 \t\tstr\tr6, [r5]
 \t\tmov\tr6, #0x32\t\t@ "2" -> written before any mapping exists
 \t\tstrb\tr6, [r5, #4]
-\t\tpop\t{r4, r5, r6}
 
 """
     marker = "\t\tmov\tr7, r1\t\t\t@ save architecture ID\n"

@@ -272,6 +272,42 @@ static void dump_ring(void)
 	}
 }
 
+/* Do the framebuffer bytes survive a reboot? Separate question from whether
+ * mainline ever wrote them: this boot records what it found, then writes a
+ * marker with a counter, so the NEXT boot can answer it.
+ */
+static void fb_persist_probe(void)
+{
+	char buf[64];
+	int fd, n;
+
+	add("\n--- FBPERSIST ---\n");
+	mknod_from_sysfs("/sys/class/graphics/fb0/dev", "/dev/fb0", 0);
+	fd = open("/dev/fb0", O_RDWR);
+	if (fd < 0) {
+		add("FBPERSIST-NOOPEN\n");
+		return;
+	}
+	n = (int)pread(fd, buf, sizeof(buf), (off_t)0x3e8000UL);
+	if (n > 0 && !memcmp(buf, "KEEP", 4)) {
+		add("FBPERSIST-SEEN counter=");
+		add((char[]){ buf[4] ? buf[4] : '?', 0 });
+		add("\n");
+		buf[4] = (char)(buf[4] + 1);
+	} else {
+		add("FBPERSIST-EMPTY\n");
+		memset(buf, 0, sizeof(buf));
+		memcpy(buf, "KEEP", 4);
+		buf[4] = '1';
+	}
+	if (pwrite(fd, buf, 64, (off_t)0x3e8000UL) == 64)
+		add("FBPERSIST-WROTE\n");
+	else
+		add("FBPERSIST-WRITEFAIL\n");
+	fsync(fd);
+	close(fd);
+}
+
 /* Does this panel display anything the kernel writes? With the vendor kernel
  * the MDSS driver has already brought the panel up, so filling fb0 answers the
  * question that blocks all on-screen debugging. */
@@ -352,6 +388,7 @@ int main(void)
 	add_file("/sys/class/graphics/fb0/stride"); add("\n");
 	paint_fb();
 	dump_ring();
+	fb_persist_probe();
 	add_dmesg();
 
 	/* cache is 614400 sectors (300 MiB); fall back to the known number. */
