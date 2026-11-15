@@ -154,6 +154,46 @@ static void echo_console(void)
 	}
 }
 
+/* Does this panel display anything the kernel writes? With the vendor kernel
+ * the MDSS driver has already brought the panel up, so filling fb0 answers the
+ * question that blocks all on-screen debugging. */
+static void paint_fb(void)
+{
+	static const char *devs[] = { "/dev/graphics/fb0", "/dev/fb0", 0 };
+	static unsigned char buf[64 * 1024];
+	unsigned long total = 800UL * 1280UL * 4UL;
+	int i, fd = -1;
+
+	for (i = 0; i < (int)sizeof(buf); i += 4) {
+		/* top half bright red, bottom half bright green, little endian xRGB */
+		buf[i + 0] = 0x00;
+		buf[i + 1] = 0x00;
+		buf[i + 2] = 0xFF;
+		buf[i + 3] = 0x00;
+	}
+	for (i = 0; devs[i]; i++) {
+		fd = open(devs[i], O_RDWR);
+		if (fd >= 0)
+			break;
+	}
+	if (fd < 0) {
+		add("FB-ABSENT no framebuffer device\n");
+		return;
+	}
+	add("FB-OPENED ");
+	add(devs[i]);
+	add("\n");
+	while (total) {
+		unsigned long chunk = total < sizeof(buf) ? total : sizeof(buf);
+		if (write(fd, buf, (size_t)chunk) != (ssize_t)chunk)
+			break;
+		total -= chunk;
+	}
+	fsync(fd);
+	close(fd);
+	add("FB-PAINTED\n");
+}
+
 int main(void)
 {
 	mkdir("/proc", 0755);
@@ -169,6 +209,9 @@ int main(void)
 	add("--- meminfo ---\n");   add_file("/proc/meminfo");    add("\n");
 	add("--- iomem ---\n");     add_file("/proc/iomem");      add("\n");
 	add("--- partitions ---\n"); add_file("/proc/partitions"); add("\n");
+	add("--- framebuffer ---\n"); add_file("/sys/class/graphics/fb0/virtual_size"); add("\n");
+	add_file("/sys/class/graphics/fb0/stride"); add("\n");
+	paint_fb();
 	add_dmesg();
 
 	/* cache is 614400 sectors (300 MiB); fall back to the known number. */
