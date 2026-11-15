@@ -154,6 +154,83 @@ static void echo_console(void)
 	}
 }
 
+/* Make a /dev node from its sysfs major:minor. devtmpfs is not enough this
+ * early: the driver's class device can exist in sysfs while the node does not.
+ */
+static int mknod_from_sysfs(const char *sysfs, const char *node, int is_blk)
+{
+	char buf[32];
+	int fd, n, maj, min;
+
+	fd = open(sysfs, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	n = (int)read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0)
+		return -1;
+	buf[n] = 0;
+	if (sscanf(buf, "%d:%d", &maj, &min) != 2)
+		return -1;
+	unlink(node);
+	return mknod(node, (is_blk ? S_IFBLK : S_IFCHR) | 0600,
+		     makedev(maj, min));
+}
+
+/* Copy the kernel-side RAM log (see earlyscreen/bringup_fb.c) into the report.
+ * It survives a reset, so a boot that hung before userspace still leaves text.
+ */
+static void dump_ring(void)
+{
+	unsigned char buf[4096];
+	int fd, n, i, j;
+
+	add("\n--- RINGLOG (0x3fe80000) ---\n");
+	if (mknod_from_sysfs("/sys/class/mem/mem/dev", "/dev/bringup-mem", 0) != 0) {
+		add("DEVMEM-NONODE\n");
+		return;
+	}
+	fd = open("/dev/bringup-mem", O_RDONLY);
+	if (fd < 0) {
+		add("DEVMEM-NOOPEN\n");
+		return;
+	}
+	n = (int)pread(fd, buf, sizeof(buf), (off_t)0x3fe80000UL);
+	close(fd);
+	if (n <= 0) {
+		add("DEVMEM-NOREAD\n");
+		return;
+	}
+	add("magic: ");
+	for (i = 0; i < 5 && i < n; i++) {
+		if (buf[i] >= 32 && buf[i] < 127)
+			add((char[]){ (char)buf[i], 0 });
+		else
+			add(".");
+	}
+	add("\nslots:\n");
+	for (j = 0; j < 24; j++) {
+		int off = 64 + j * 64;
+		int empty = 1;
+		if (off >= n)
+			break;
+		for (i = 0; i < 63 && off + i < n; i++)
+			if (buf[off + i])
+				empty = 0;
+		if (empty)
+			continue;
+		add("  ");
+		for (i = 0; i < 63 && off + i < n && buf[off + i]; i++) {
+			unsigned char c = buf[off + i];
+			if (c >= 32 && c < 127)
+				add((char[]){ (char)c, 0 });
+			else
+				add("?");
+		}
+		add("\n");
+	}
+}
+
 /* Does this panel display anything the kernel writes? With the vendor kernel
  * the MDSS driver has already brought the panel up, so filling fb0 answers the
  * question that blocks all on-screen debugging. */
@@ -171,6 +248,9 @@ static void paint_fb(void)
 		buf[i + 2] = 0xFF;
 		buf[i + 3] = 0x00;
 	}
+	/* devtmpfs often has no node yet even though the class device exists */
+	mknod_from_sysfs("/sys/class/graphics/fb0/dev", "/dev/fb0", 0);
+	mknod_from_sysfs("/sys/class/graphics/fb0/dev", "/dev/graphics/fb0", 0);
 	for (i = 0; devs[i]; i++) {
 		fd = open(devs[i], O_RDWR);
 		if (fd >= 0)
@@ -212,6 +292,7 @@ int main(void)
 	add("--- framebuffer ---\n"); add_file("/sys/class/graphics/fb0/virtual_size"); add("\n");
 	add_file("/sys/class/graphics/fb0/stride"); add("\n");
 	paint_fb();
+	dump_ring();
 	add_dmesg();
 
 	/* cache is 614400 sectors (300 MiB); fall back to the known number. */

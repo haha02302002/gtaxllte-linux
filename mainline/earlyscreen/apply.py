@@ -47,7 +47,8 @@ def add_decls(path):
     for i, ln in enumerate(lines):
         if ln.startswith('#include'):
             lines.insert(i + 1,
-                         'extern void brfb(int);\nextern void brfb_panic(void);\n')
+                         'extern void brfb(int);\nextern void brfb_panic(void);\n'
+                         'extern void brlog_panic(const char *msg);\n')
             with open(path, 'w', encoding='utf-8', newline='') as f:
                 f.writelines(lines)
             print("  declared in %s" % os.path.basename(path))
@@ -89,9 +90,16 @@ def main():
     for anchor, addition in STEPS:
         ok &= insert_after(main_c, anchor, addition)
     panic_c = os.path.join(tree, "kernel", "panic.c")
+    # keep the panic text itself: on a dark panel the RAM log is the only place
+    # it can survive to be read on the next boot
+    with open(panic_c, encoding='utf-8', newline='') as f:
+        psrc = f.read()
+    if 'brlog_panic(buf)' not in psrc:
+        psrc = psrc.replace("\tbrfb_panic();\n", "")
+        open(panic_c, 'w', encoding='utf-8', newline='').write(psrc)
     ok &= insert_after(panic_c,
                        '\tpr_emerg("Kernel panic - not syncing: %s\\n", buf);\n',
-                       "\tbrfb_panic();\n")
+                       "\tbrlog_panic(buf);\n")
     ok &= add_decls(main_c)
     ok &= add_decls(panic_c)
     if not ok:

@@ -15,6 +15,7 @@
 #include <linux/types.h>
 #include <linux/io.h>
 
+#define BRL_PHYS  0x3fe80000UL	/* 64 KiB RAM log, survives a reset */
 #define FB_PHYS   0x03200000UL
 #define FB_W      800
 #define FB_STRIDE 3200
@@ -24,6 +25,32 @@
 
 void brfb(int n);
 void brfb_panic(void);
+void brlog_panic(const char *msg);
+
+/* A hang on this tablet is invisible: aboot hands over with the panel dark, so
+ * neither fbcon nor the markers above can be assumed readable. Samsung's own
+ * design solves this with a log in RAM that outlives a reset (their sec_log at
+ * 0x3fe00008); this is the same trick in a region nothing else uses. The next
+ * boot - any kernel - can read it, and this port's initramfs dumps it.
+ */
+static void brl_slot(int slot, const char *text)
+{
+	u8 *p = (u8 *)__va(BRL_PHYS);
+	u8 *hdr = p;
+	int i;
+
+	hdr[0] = 'B';
+	hdr[1] = 'R';
+	hdr[2] = 'U';
+	hdr[3] = 'P';
+	hdr[4] = '1';
+	hdr[5] = 0;
+
+	p += 64 + slot * 64;
+	for (i = 0; i < 63 && text[i]; i++)
+		p[i] = (u8)text[i];
+	p[i] = 0;
+}
 
 static void fill(int x0, int y0, int w, int h, u32 colour)
 {
@@ -49,6 +76,13 @@ void brfb_panic(void)
 	fill(0, 264, FB_W, 260, 0x00000000);
 }
 
+/* panic() hands us the formatted message: keep it, it is the whole point */
+void brlog_panic(const char *msg)
+{
+	brfb_panic();
+	brl_slot(20, msg);
+}
+
 void brfb(int n)
 {
 	static const u32 colours[] = {
@@ -61,6 +95,14 @@ void brfb(int n)
 		0x00FF8000, /* slot 7  orange  - rest_init reached */
 	};
 
+	{
+		static const char *const names[] = {
+			"0", "setup_arch", "security", "mm_core", "sched",
+			"time", "console", "rest_init",
+		};
+		if (n >= 1 && n <= 7)
+			brl_slot(n, names[n]);
+	}
 	if (n <= 0) {
 		fill(0, 0, FB_W, 1280, 0x00000000);
 		return;
